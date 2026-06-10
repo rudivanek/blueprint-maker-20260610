@@ -17,6 +17,7 @@
 import { useState } from 'react';
 import { DESIGN_SYSTEM_EXTRACTION_PROMPT, STRUCTURE_IMPORT_PROMPT } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
+import { usageStore } from '../lib/usage';
 import type { Section, GlobalSettings, AIProvider } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ interface AnthropicContentBlock {
 interface AnthropicResponse {
   content: AnthropicContentBlock[];
   stop_reason?: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
 }
 
 interface AnthropicTool {
@@ -127,6 +129,9 @@ async function callAnthropic(
 
   const data: AnthropicResponse = await response.json();
 
+  // Report token usage to the global counter
+  usageStore.report('claude-sonnet-4-6', data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
+
   // Join ALL text blocks (previous version only read content[0])
   const text = (data.content || [])
     .filter(b => b.type === 'text' && typeof b.text === 'string')
@@ -152,6 +157,7 @@ async function callAnthropic(
 
 interface OpenAIResponse {
   choices: Array<{ message: { content: string }; finish_reason?: string }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 function toOpenAIContent(parts: ContentPart[]): unknown {
@@ -205,6 +211,10 @@ async function callOpenAI(
   }
 
   const data: OpenAIResponse = await response.json();
+
+  // Report token usage to the global counter
+  usageStore.report('gpt-4.1', data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0);
+
   const choice = data.choices?.[0];
   return {
     text: choice?.message?.content ?? '',
@@ -394,10 +404,17 @@ function cleanHtml(html: string): string {
   );
 
   const cleaned = htmlWithPlaceholders
+    // RESCUE LAZY-LOADED IMAGES (must run BEFORE data-* attributes are stripped):
+    // WordPress/Elementor lazy-loaders hide real URLs in data-src / data-lazy-src /
+    // data-bg etc. Promote them to real src / style attributes so the AI sees them.
+    .replace(/\bdata-(?:src|lazy-src|lazy_src|lazysrc|original)=(["'])/gi, 'src=$1')
+    .replace(/\bdata-(?:bg|background|bg-src|background-image)=(["'])([^"']+)\1/gi, 'style=$1background-image:url($2)$1')
+    // Unwrap <noscript> instead of deleting it — lazy-loaders put the REAL
+    // <img src="..."> fallback inside noscript.
+    .replace(/<noscript\b[^>]*>([\s\S]*?)<\/noscript>/gi, '$1')
     // Big structural noise
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
     // SVG innards are huge and carry no layout info (the screenshot shows icons)
     .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, '<svg data-omitted="true"></svg>')
@@ -436,6 +453,75 @@ function truncateHtml(html: string, firstChars: number, lastChars: number): stri
   const head = html.slice(0, firstChars);
   const tail = html.slice(-lastChars);
   return `${head}\n\n<!-- ... middle content truncated for length ... -->\n\n${tail}`;
+}
+
+/**
+ * Harvest font families from Google Fonts <link> tags and @font-face rules.
+ * These links sit in the HTML head and were previously stripped before the
+ * design AI ever saw them — causing it to wrongly report "no fonts detected"
+ * and substitute lookalikes (e.g. Playfair Display instead of DM Serif Display).
+ */
+function harvestFonts(rawHtml: string): string[] {
+  const fonts = new Set<string>();
+  // Google Fonts links: css?family=DM+Serif+Display:100,...|Other and css2?family=A&family=B
+  const linkPattern = /fonts\.googleapis\.com\/css2?\?([^"'>\s]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = linkPattern.exec(rawHtml)) !== null) {
+    const qs = m[1].replace(/&amp;/g, '&');
+    for (const param of qs.split('&')) {
+      if (!param.toLowerCase().startsWith('family=')) continue;
+      // css v1 packs several families separated by |
+      for (const fam of param.slice(7).split('|')) {
+        const name = decodeURIComponent(fam.split(':')[0]).replace(/\+/g, ' ').trim();
+        if (name) fonts.add(name);
+      }
+    }
+  }
+  // @font-face declarations in inline style blocks
+  const ffPattern = /@font-face\s*\{[^}]*font-family\s*:\s*["']?([^"';}]+)/gi;
+  while ((m = ffPattern.exec(rawHtml)) !== null) {
+    fonts.add(m[1].trim());
+  }
+  return [...fonts];
+}
+
+/**
+ * Frequency-ranked hex colors found anywhere in the markup (SVG fills,
+ * inline styles, style blocks). Inline SVG fill colors are usually the
+ * true brand palette — previously stripped with the SVG innards.
+ */
+function harvestDominantColors(rawHtml: string, top = 14): { hex: string; count: number }[] {
+  const counts = new Map<string, number>();
+  const hexPattern = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+  const matches = rawHtml.match(hexPattern) || [];
+  for (const raw of matches) {
+    const hex = raw.toUpperCase();
+    counts.set(hex, (counts.get(hex) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([hex, count]) => ({ hex, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, top);
+}
+
+/**
+ * Harvest EVERY image URL from the raw, uncleaned HTML — including ones that
+ * only exist inside <style> blocks (CSS background-image), Elementor
+ * data-settings JSON, preload links, srcset, and og:image meta tags.
+ * These never survive cleaning as <img> tags, which is why parallax/CSS
+ * background photos used to come through with empty src.
+ */
+function harvestImageUrls(rawHtml: string): string[] {
+  const pattern = /https?:\/\/[^\s"'()<>\\]+?\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^\s"'()<>\\]*)?/gi;
+  const found = rawHtml.match(pattern) || [];
+  // Also catch escaped URLs inside JSON blobs like Elementor data-settings: https:\/\/...
+  const jsonEscaped = rawHtml.match(/https?:\\\/\\\/[^\s"']+?\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^\s"']*)?/gi) || [];
+  const unescaped = jsonEscaped.map(u => u.replace(/\\\//g, '/'));
+  const all = [...found, ...unescaped]
+    .map(u => u.replace(/&amp;/g, '&'))
+    // Drop tiny theme assets that are never section backgrounds
+    .filter(u => !/(?:emoji|favicon|spinner|loader|blank|pixel|1x1)/i.test(u));
+  return [...new Set(all)].slice(0, 80);
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +583,18 @@ export function useAI(provider: AIProvider, anthropicKey: string, openaiKey: str
         ? `\n\nIMPORTANT: ${screenshots.length} full-page screenshot slice(s) of the rendered page are attached above (top-to-bottom). Use them as the AUTHORITATIVE source for actual rendered colors (nav background, button colors, section backgrounds, text colors) and visual font characteristics (serif vs sans-serif, weight). The CSS text below may contain unused rules — the screenshot shows what is actually rendered. If the CSS and the screenshot disagree, trust the screenshot.`
         : '';
 
+      // Fonts from Google Fonts <link> tags / @font-face — authoritative.
+      const detectedFonts = harvestFonts(rawHtml);
+      const fontsBlock = detectedFonts.length > 0
+        ? `\n\nFONTS DETECTED IN HTML (Google Fonts links / @font-face) — these are the site's REAL fonts. Use them as the heading/body families. Do NOT substitute lookalikes and do NOT claim no fonts were found:\n${detectedFonts.join('\n')}`
+        : '\n\nNo font links or @font-face rules were found in the HTML. Infer serif/sans-serif character from the screenshot and clearly mark the chosen families as PLACEHOLDERS to verify manually.';
+
+      // Frequency-ranked hex colors from markup (SVG fills = brand palette).
+      const dominantColors = harvestDominantColors(rawHtml);
+      const colorsBlock = dominantColors.length > 0
+        ? `\n\nHEX COLORS FOUND IN MARKUP, ranked by frequency (inline SVG icon/button fills are usually the true brand palette — incorporate the most frequent non-neutral ones as primary/accent colors rather than inventing values):\n${dominantColors.map(c => `${c.hex} (×${c.count})`).join('\n')}`
+        : '';
+
       const userText = `Here is the branding extract data from the website:
 \`\`\`json
 ${JSON.stringify(extractData, null, 2)}
@@ -510,9 +608,9 @@ ${cssBlocks.slice(0, 8).join('\n\n').substring(0, 80000)}
 Sample inline styles found:
 \`\`\`
 ${inlineStyles.slice(0, 80).join('\n')}
-\`\`\`${screenshotNote}
+\`\`\`${screenshotNote}${fontsBlock}${colorsBlock}
 
-Please generate the complete design.md file following the exact format specified in the system prompt. Resolve ALL CSS variables to their actual hex values.`;
+Please generate the complete design.md file following the exact format specified in the system prompt. Resolve ALL CSS variables to their actual hex values. Every hex value you output must be valid ASCII (characters 0-9, A-F only).`;
 
       setStatus(`AI is generating design system${screenshots.length > 0 ? ' (with visual reference)' : ''}...`);
 
@@ -546,13 +644,8 @@ Please generate the complete design.md file following the exact format specified
 
     const systemPrompt = `You are a WordPress/Elementor page content extractor. You receive rendered markdown content, raw HTML supplements, and possibly full-page screenshot slices from the same page. Your job is to combine them into a clean, structured content summary that preserves all meaningful page information for blueprint generation. When screenshots are attached, use them to determine the true visual section order and to assign images to their correct sections.`;
 
-    const imgSrcPattern = /src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp|gif|svg)[^"']*)["']/gi;
-    const imgUrls: string[] = [];
-    let imgMatch;
-    while ((imgMatch = imgSrcPattern.exec(rawHtml)) !== null) {
-      imgUrls.push(imgMatch[1]);
-    }
-    const uniqueImgUrls = [...new Set(imgUrls)].slice(0, 50);
+    // Broad harvest: catches src=, CSS url(...), data-settings JSON, preloads
+    const uniqueImgUrls = harvestImageUrls(rawHtml);
 
     const videoSrcPattern = /src=["'](https?:\/\/[^"']+\.mp4[^"']*)["']/gi;
     const videoUrls: string[] = [];
@@ -634,6 +727,11 @@ ${uniqueNavLinks.join('\n')}
     setStatus('Analyzing page structure with AI...');
 
     try {
+      // Harvest image URLs from the FULL raw HTML before any cleaning —
+      // this catches CSS background-image URLs the cleaned HTML no longer contains.
+      const imageManifest = harvestImageUrls(rawHtml);
+      console.log('Image manifest:', imageManifest.length, 'URLs');
+
       const cleaned = cleanHtml(rawHtml);
       console.log('HTML before clean:', rawHtml.length, 'chars — after clean:', cleaned.length, 'chars');
       const truncatedHtml = truncateHtml(cleaned, 150000, 50000);
@@ -647,7 +745,11 @@ ${uniqueNavLinks.join('\n')}
         ? `\n\nVISUAL REFERENCE: ${screenshots.length} full-page screenshot slice(s) of the rendered page are attached above, in top-to-bottom order. The screenshots are the HIGHEST AUTHORITY for: section boundaries and order, column counts, image positions, background images vs solid colors, overlay treatments, and which content is actually visible. Cross-check every section you extract against the screenshots. If the HTML suggests one layout but the screenshot clearly shows another, trust the screenshot.`
         : '';
 
-      const userText = `Here is the raw HTML from the webpage. Extract all sections and globals:${compactInstruction}${screenshotNote}
+      const manifestBlock = imageManifest.length > 0
+        ? `\n\nIMAGE URL MANIFEST — every image URL found ANYWHERE in the page source (including CSS background-image rules, Elementor data-settings, preloads). Many of these are section backgrounds that do NOT appear as <img> tags in the HTML below. RULE: when the screenshot clearly shows a photograph in a section but you find no <img> for it in the HTML, select the best-matching URL from this manifest (use filename hints like names, 'hero', 'doctor', subject keywords) and put it in that section's images array with the correct position (e.g. 'background', 'right-column', 'card-background'). Do not leave a section's images empty when the screenshot shows a real photo and a plausible manifest URL exists. Never assign the same manifest URL to multiple unrelated sections.\n${imageManifest.join('\n')}\n`
+        : '';
+
+      const userText = `Here is the raw HTML from the webpage. Extract all sections and globals:${compactInstruction}${screenshotNote}${manifestBlock}
 
 \`\`\`html
 ${truncatedHtml}
