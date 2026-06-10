@@ -157,6 +157,7 @@ export interface Page {
   sort_order: number;
   custom_instructions: string;
   page_url: string;
+  generated_html: string;
   created_at: string;
   updated_at: string;
   sections?: Section[];
