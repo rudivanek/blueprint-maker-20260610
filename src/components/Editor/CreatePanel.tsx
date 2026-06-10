@@ -65,7 +65,7 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false 
   };
 
   const canGenerate = brief.trim().length > 10 && !generating &&
-    (provider === 'anthropic' ? anthropicKey : openaiKey);
+    (provider === 'anthropic' ? anthropicKey : openaiKey) !== '';
 
   // Inline collapsible mode
   if (inline) {
