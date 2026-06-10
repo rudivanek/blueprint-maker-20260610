@@ -13,6 +13,7 @@
 import { useState, useRef } from 'react';
 import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
+import { usageStore } from '../lib/usage';
 import type { GlobalSettings, Page, Section, AIProvider } from '../types';
 
 interface GenerateArgs {
@@ -148,33 +149,57 @@ async function streamAnthropic(
   let text = '';
   let stopReason = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  // Live usage tracking: message_start carries input tokens; message_delta
+  // events carry CUMULATIVE output token counts as the stream progresses.
+  const callId = usageStore.startCall('claude-sonnet-4-6');
+  let sawUsage = false;
 
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === '[DONE]') continue;
-      try {
-        const evt = JSON.parse(payload);
-        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-          text += evt.delta.text;
-          onProgress(text.length);
-        } else if (evt.type === 'message_delta' && evt.delta?.stop_reason) {
-          stopReason = evt.delta.stop_reason;
-        } else if (evt.type === 'error') {
-          throw new Error(evt.error?.message || 'Streaming error');
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const evt = JSON.parse(payload);
+          if (evt.type === 'message_start' && evt.message?.usage) {
+            sawUsage = true;
+            usageStore.progressCall(callId, {
+              inputTokens: evt.message.usage.input_tokens ?? 0,
+              outputTokens: evt.message.usage.output_tokens ?? 0,
+            });
+          } else if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+            text += evt.delta.text;
+            onProgress(text.length);
+          } else if (evt.type === 'message_delta') {
+            if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+            if (evt.usage?.output_tokens !== undefined) {
+              sawUsage = true;
+              usageStore.progressCall(callId, { outputTokens: evt.usage.output_tokens });
+            }
+          } else if (evt.type === 'error') {
+            throw new Error(evt.error?.message || 'Streaming error');
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue; // partial JSON line — skip
+          throw e;
         }
-      } catch (e) {
-        if (e instanceof SyntaxError) continue; // partial JSON line — skip
-        throw e;
       }
     }
+    if (sawUsage) usageStore.endCall(callId);
+    else usageStore.abortCall(callId);
+  } catch (e) {
+    // Keep whatever usage we observed before the failure
+    if (sawUsage) usageStore.endCall(callId);
+    else usageStore.abortCall(callId);
+    throw e;
   }
 
   return { text, truncated: stopReason === 'max_tokens' };
@@ -224,6 +249,7 @@ async function callOpenAIGenerate(
   }
 
   const data = await response.json();
+  usageStore.report('gpt-4.1', data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0);
   const choice = data.choices?.[0];
   return {
     text: choice?.message?.content ?? '',
