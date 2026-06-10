@@ -1,6 +1,11 @@
 import type { GlobalSettings, Page, Section } from '../types';
 
 export const DESIGN_SYSTEM_EXTRACTION_PROMPT = `You are a precision design system analyst. You will receive:
+
+## FONT AND COLOR EVIDENCE RULES (CRITICAL)
+- If the user message contains a "FONTS DETECTED IN HTML" list, those families ARE the site's fonts. Use them verbatim as --font-heading / --font-body (assign serif fonts to headings, sans-serif to body). Never substitute a similar-looking font and never state that no fonts were detected.
+- If the user message contains a "HEX COLORS FOUND IN MARKUP" list, treat the most frequent non-neutral colors (not white/black/grays) as the brand palette — these come from the site's own SVG icons and buttons. Build primary/secondary/accent tokens from them instead of inventing plausible-looking values.
+- All hex values must use ASCII characters only (0-9, A-F). Double-check there are no lookalike Unicode characters.
 1. Branding/extract data from a website (colors, fonts, brand name, logo)
 2. Raw HTML including <style> tags and inline styles from that website
 
@@ -327,6 +332,15 @@ GOOD layout_description (ALWAYS do this when real images exist):
 
 Apply this inline embedding to every real image URL found in the section — hero backgrounds, card thumbnails, content images, gallery images, etc.
 
+### Rule 3b: PRESERVE EMPHASIS PLACEMENT IN COPY
+When a heading or title contains styled spans (e.g. <span class="italic">, <em>, or an accent-colored word), wrap EXACTLY those words in *asterisks* in the copy/title fields, e.g. "No siempre se trata de *aguantar* más." This tells the builder which precise words carry the italic/accent treatment. Never drop or relocate the emphasis.
+
+### Rule 3c: NAVIGATION DROPDOWNS AND FOOTER CONTACT DETAILS
+If a nav item has a dropdown/submenu, list every sub-item in the navigation table using the format "ParentLabel > SubLabel". In globals, capture footer contact details VERBATIM: phone numbers, street addresses, person names/credentials, and opening hours all belong in the footer description or a contact list — losing them forces the builder to either omit or invent them.
+
+### Rule 4-PRE: IMAGE URL MANIFEST — backgrounds hidden in CSS
+The user message may include an IMAGE URL MANIFEST: every image URL found anywhere in the page source, including CSS background-image rules and builder JSON settings that are invisible in the body HTML. When a section visibly contains a photograph (per the screenshots) but has no <img> tag in the HTML, you MUST pick the best-matching manifest URL (filename keywords help) and record it in that section's images array with the correct position. A section whose screenshot shows a real photo must never end up with an empty images array when a plausible manifest URL exists.
+
 ### Rule 4: Detect and preserve CSS background-image properties
 When analyzing HTML, look for background-image URLs in BOTH inline styles (style="background-image: url(...)") AND class-based CSS rules in <style> tags. When found:
 - Extract the full image URL
@@ -507,6 +521,13 @@ The client needs to see a recognizable version of their own page structure. They
 - **ACCORDIONS/FAQs:** Show all items fully expanded — no collapsed state
 - **FORMS:** Render input fields as static visual elements with visible labels
 - **MODALS/OVERLAYS:** Do not render — skip entirely
+- **BACKGROUND VIDEOS:** When a section's images/notes specify a background VIDEO URL (.mp4/.webm), embed it: \`<video autoplay muted loop playsinline src="VIDEO_URL"></video>\` absolutely positioned to cover the section (position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0), with the overlay and content layered above it (z-index:1+). Also set the section's background-color to the overlay hex as a fallback for when the video cannot load. Never replace a specified background video with only a flat solid color.
+- **NO INVENTED FACTS — ABSOLUTE RULE:** Never fabricate phone numbers, street addresses, opening hours, email addresses, people's names, testimonial quotes, video captions/labels, statistics, or any copy not present in the blueprint. If the blueprint does not provide a detail, OMIT that element entirely — an honest gap is correct, an invented phone number or address is a critical failure.
+- **EXACT SECTION BACKGROUNDS:** Use each section's Background hex value exactly as written in its blueprint. Never swap background colors between sections, never substitute a "nicer" tone, never lighten or darken.
+- **NO CROSS-SECTION IMAGE REUSE:** Never reuse an image assigned to one section as the background or content of a different section (e.g., do not reuse the hero photo as the CTA banner background). If a section lacks its own image, follow the MISSING BACKGROUND PHOTOS rule instead.
+- **TYPOGRAPHY FIDELITY:** Use exactly the font families named in the design system (import them from Google Fonts). Never substitute a lookalike (e.g., never swap DM Serif Display for Playfair Display). Never introduce accent colors that are not in the design system — if the design system has navy + green, do not add gold.
+- **EMPHASIS PLACEMENT:** When headline or title copy marks specific words with *asterisks* or <em>, apply the italic/accent styling to exactly those words — not the first word, not a different word.
+- **MISSING BACKGROUND PHOTOS:** When the blueprint describes a photographic background but provides NO image URL, use a dark photographic placeholder: \`https://placehold.co/1920x1080/[overlay-hex]/[overlay-hex]\` layered under the overlay, or a subtle CSS gradient between two near-identical dark tones — NEVER a single flat solid color, and NEVER invented decorative graphics, letters, watermarks, or shapes as a substitute.
 
 ## WHAT MATTERS MOST (in order)
 1. Section structure — every section present, in the exact order from the blueprint
@@ -552,7 +573,7 @@ The layout_contract fields mean:
 4. **Do not convert grids to stacked cards on desktop.** Grids stay grids on desktop. Only collapse to single column at mobile breakpoints as specified in mobile_layout.
 5. **Do not convert 2-column splits to centered stacks.** Image-right stays image-right. Text-left stays text-left. On desktop only.
 6. **Do not change header/footer color logic** unless the blueprint explicitly specifies a different color. Use the nav and footer style from Global Settings.
-7. **Do not add sections, content, or design elements** not in the blueprint. No decorative additions.
+7. **Do not add sections, content, or design elements** not in the blueprint. No decorative additions — no invented watermarks, oversized letters, abstract shapes, or background graphics that are not explicitly described in the blueprint.
 8. **Use the screenshot as the highest visual reference** when attached. If there is any ambiguity about column count or image placement, the screenshot resolves it.
 
 ## FILES PROVIDED
