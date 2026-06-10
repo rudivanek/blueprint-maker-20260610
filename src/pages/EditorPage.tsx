@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Layers, FileText, Download, Loader2, X, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Pencil, Eye } from 'lucide-react';
+import { Plus, Layers, FileText, Download, Loader2, X, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Pencil, Eye, Wand2} from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { useProject } from '../hooks/useProjects';
 import { usePages } from '../hooks/usePages';
@@ -12,6 +12,7 @@ import { SectionTemplateModal } from '../components/Editor/SectionTemplateModal'
 import { DesignPanel } from '../components/Editor/DesignPanel';
 import { DesignSourcePanel } from '../components/Editor/DesignSourcePanel';
 import { ImportPanel } from '../components/Editor/ImportPanel';
+import { CreatePanel } from '../components/Editor/CreatePanel';
 import { ExportPanel } from '../components/Export/ExportPanel';
 import { PreviewPanel } from '../components/Editor/PreviewPanel';
 import { loadSettings } from '../lib/settings';
@@ -230,6 +231,7 @@ export function EditorPage({ user }: EditorPageProps) {
     { id: 'sections', icon: Layers, label: 'Sections' },
     { id: 'design', icon: FileText, label: 'Design' },
     { id: 'preview', icon: Eye, label: 'Preview' },
+  { id: 'create', icon: Wand2, label: 'Create' },
     { id: 'export', icon: Download, label: 'Export' },
   ];
 
@@ -432,6 +434,17 @@ export function EditorPage({ user }: EditorPageProps) {
               </form>
             )}
           </div>
+
+          {/* Create mode — generate from scratch */}
+          {activePanel === 'create' && (
+            <div className="flex-1 overflow-hidden">
+              <CreatePanel
+                provider={appSettings.provider}
+                anthropicKey={appSettings.anthropicKey}
+                openaiKey={appSettings.openaiKey}
+              />
+            </div>
+          )}
 
           {/* Preview mode replaces the sections list */}
           {activePanel === 'preview' && activePage ? (
