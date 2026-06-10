@@ -23,7 +23,7 @@ interface EditorPageProps {
   user: User;
 }
 
-type ActivePanel = 'sections' | 'design' | 'export' | 'preview';
+type ActivePanel = 'sections' | 'design' | 'export' | 'preview' | 'create';
 
 export function EditorPage({ user }: EditorPageProps) {
   const { projectId } = useParams<{ projectId: string }>();
@@ -260,11 +260,12 @@ export function EditorPage({ user }: EditorPageProps) {
             {panelButtons.map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
-                onClick={() => setActivePanel(id)}
-                className={`flex-1 flex flex-col items-center gap-1 py-2 text-[10px] font-medium transition-all ${activePanel === id ? 'bg-white text-[#2575FC] border-t border-l border-r border-[#E5E7EB] -mb-px relative z-10' : 'text-[#9CA3AF] hover:text-[#111827]'}`}
+                onClick={() => setActivePanel(id as ActivePanel)}
+                title={label}
+                className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 text-[9px] font-medium transition-all min-w-0 ${activePanel === id ? 'bg-white text-[#2575FC] border-t border-l border-r border-[#E5E7EB] -mb-px relative z-10' : 'text-[#9CA3AF] hover:text-[#111827]'}`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
+                <Icon className="w-3 h-3 shrink-0" />
+                <span className="truncate w-full text-center leading-none">{label}</span>
               </button>
             ))}
           </div>
