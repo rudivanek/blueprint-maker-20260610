@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Layers, FileText, Download, Loader2, X, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Pencil } from 'lucide-react';
+import { Plus, Layers, FileText, Download, Loader2, X, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Pencil, Eye, Wand2 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { useProject } from '../hooks/useProjects';
 import { usePages } from '../hooks/usePages';
@@ -12,7 +12,9 @@ import { SectionTemplateModal } from '../components/Editor/SectionTemplateModal'
 import { DesignPanel } from '../components/Editor/DesignPanel';
 import { DesignSourcePanel } from '../components/Editor/DesignSourcePanel';
 import { ImportPanel } from '../components/Editor/ImportPanel';
+import { CreatePanel } from '../components/Editor/CreatePanel';
 import { ExportPanel } from '../components/Export/ExportPanel';
+import { PreviewPanel } from '../components/Editor/PreviewPanel';
 import { loadSettings } from '../lib/settings';
 import { SECTION_TEMPLATES } from '../types';
 import type { GlobalSettings, Section, Page } from '../types';
@@ -21,7 +23,7 @@ interface EditorPageProps {
   user: User;
 }
 
-type ActivePanel = 'sections' | 'design' | 'export';
+type ActivePanel = 'sections' | 'design' | 'export' | 'preview';
 
 export function EditorPage({ user }: EditorPageProps) {
   const { projectId } = useParams<{ projectId: string }>();
@@ -172,6 +174,11 @@ export function EditorPage({ user }: EditorPageProps) {
     }
   };
 
+  const handleGeneratedHtmlSaved = async (pageId: string, generatedHtml: string) => {
+    await updatePage(pageId, { generated_html: generatedHtml });
+    triggerSaved();
+  };
+
   const handleDesignGenerated = async (designMd: string) => {
     await updateDesignMd(designMd);
     triggerSaved();
@@ -223,6 +230,7 @@ export function EditorPage({ user }: EditorPageProps) {
   const panelButtons: { id: ActivePanel; icon: typeof Layers; label: string }[] = [
     { id: 'sections', icon: Layers, label: 'Sections' },
     { id: 'design', icon: FileText, label: 'Design' },
+    { id: 'preview', icon: Eye, label: 'Preview' },
     { id: 'export', icon: Download, label: 'Export' },
   ];
 
@@ -251,11 +259,12 @@ export function EditorPage({ user }: EditorPageProps) {
             {panelButtons.map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
-                onClick={() => setActivePanel(id)}
-                className={`flex-1 flex flex-col items-center gap-1 py-2 text-[10px] font-medium transition-all ${activePanel === id ? 'bg-white text-[#2575FC] border-t border-l border-r border-[#E5E7EB] -mb-px relative z-10' : 'text-[#9CA3AF] hover:text-[#111827]'}`}
+                onClick={() => setActivePanel(id as ActivePanel)}
+                title={label}
+                className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 text-[9px] font-medium transition-all min-w-0 ${activePanel === id ? 'bg-white text-[#2575FC] border-t border-l border-r border-[#E5E7EB] -mb-px relative z-10' : 'text-[#9CA3AF] hover:text-[#111827]'}`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
+                <Icon className="w-3 h-3 shrink-0" />
+                <span className="truncate w-full text-center leading-none">{label}</span>
               </button>
             ))}
           </div>
@@ -309,6 +318,25 @@ export function EditorPage({ user }: EditorPageProps) {
                   activeSections={sections}
                   screenshotMap={screenshotMap}
                 />
+              </div>
+            )}
+
+            {activePanel === 'preview' && (
+              <div className="p-3">
+                <div className="bg-white border border-[#E5E7EB] p-4">
+                  <p className="text-[#111827] text-sm font-medium mb-2">HTML Prototype</p>
+                  <p className="text-[10px] text-[#9CA3AF] leading-relaxed">
+                    Generates a standalone HTML file from this page's design.md and blueprint —
+                    the same instructions as the ZIP export, but rendered right here.
+                    Use the feedback field to request changes, Compare to check against
+                    the original screenshot, and Download to save the .html file.
+                  </p>
+                  {project.design_md ? (
+                    <p className="text-[10px] text-green-600 mt-2">✓ design.md is set</p>
+                  ) : (
+                    <p className="text-[10px] text-amber-600 mt-2">⚠ No design.md yet — extract it in the Design tab for better results.</p>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -407,7 +435,21 @@ export function EditorPage({ user }: EditorPageProps) {
             )}
           </div>
 
-          {/* Sections list */}
+          {/* Preview mode replaces the sections list */}
+          {activePanel === 'preview' && activePage ? (
+            <div className="flex-1 overflow-hidden">
+              <PreviewPanel
+                key={activePage.id}
+                designMd={project.design_md}
+                globals={project.globals}
+                page={activePage}
+                sections={sections}
+                screenshot={screenshotMap[activePage.id]}
+                appSettings={appSettings}
+                onHtmlSaved={handleGeneratedHtmlSaved}
+              />
+            </div>
+          ) : (
           <div className="flex-1 overflow-auto px-5 py-5">
             {!activePage ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
@@ -420,6 +462,14 @@ export function EditorPage({ user }: EditorPageProps) {
               </div>
             ) : (
               <>
+                {/* Create from Brief — inline panel */}
+                <CreatePanel
+                  provider={appSettings.provider}
+                  anthropicKey={appSettings.anthropicKey}
+                  openaiKey={appSettings.openaiKey}
+                  inline={true}
+                />
+
                 {/* Per-page import */}
                 <ImportPanel
                   projectUrl={project.url}
@@ -580,6 +630,7 @@ export function EditorPage({ user }: EditorPageProps) {
               </>
             )}
           </div>
+          )}
         </div>
       </div>
 
