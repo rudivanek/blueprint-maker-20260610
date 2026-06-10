@@ -11,9 +11,8 @@
 //   in-app generation uses the exact same instructions as the ZIP export.
 
 import { useState, useRef } from 'react';
-import { generateBlueprintMd, getMasterPrompt, getScratchPrompt } from '../lib/prompts';
+import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
-import { usageStore } from '../lib/usage';
 import type { GlobalSettings, Page, Section, AIProvider } from '../types';
 
 interface GenerateArgs {
@@ -149,57 +148,33 @@ async function streamAnthropic(
   let text = '';
   let stopReason = '';
 
-  // Live usage tracking: message_start carries input tokens; message_delta
-  // events carry CUMULATIVE output token counts as the stream progresses.
-  const callId = usageStore.startCall('claude-sonnet-4-6');
-  let sawUsage = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const evt = JSON.parse(payload);
-          if (evt.type === 'message_start' && evt.message?.usage) {
-            sawUsage = true;
-            usageStore.progressCall(callId, {
-              inputTokens: evt.message.usage.input_tokens ?? 0,
-              outputTokens: evt.message.usage.output_tokens ?? 0,
-            });
-          } else if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-            text += evt.delta.text;
-            onProgress(text.length);
-          } else if (evt.type === 'message_delta') {
-            if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
-            if (evt.usage?.output_tokens !== undefined) {
-              sawUsage = true;
-              usageStore.progressCall(callId, { outputTokens: evt.usage.output_tokens });
-            }
-          } else if (evt.type === 'error') {
-            throw new Error(evt.error?.message || 'Streaming error');
-          }
-        } catch (e) {
-          if (e instanceof SyntaxError) continue; // partial JSON line — skip
-          throw e;
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const evt = JSON.parse(payload);
+        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+          text += evt.delta.text;
+          onProgress(text.length);
+        } else if (evt.type === 'message_delta' && evt.delta?.stop_reason) {
+          stopReason = evt.delta.stop_reason;
+        } else if (evt.type === 'error') {
+          throw new Error(evt.error?.message || 'Streaming error');
         }
+      } catch (e) {
+        if (e instanceof SyntaxError) continue; // partial JSON line — skip
+        throw e;
       }
     }
-    if (sawUsage) usageStore.endCall(callId);
-    else usageStore.abortCall(callId);
-  } catch (e) {
-    // Keep whatever usage we observed before the failure
-    if (sawUsage) usageStore.endCall(callId);
-    else usageStore.abortCall(callId);
-    throw e;
   }
 
   return { text, truncated: stopReason === 'max_tokens' };
@@ -249,7 +224,6 @@ async function callOpenAIGenerate(
   }
 
   const data = await response.json();
-  usageStore.report('gpt-4.1', data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0);
   const choice = data.choices?.[0];
   return {
     text: choice?.message?.content ?? '',
@@ -312,64 +286,7 @@ export function useGenerateHtml(provider: AIProvider, anthropicKey: string, open
     }
   };
 
-  // -----------------------------------------------------------------------
-  // Generate from scratch — design.md + creative brief, no blueprint
-  // -----------------------------------------------------------------------
-  const generateFromScratch = async (args: {
-    designMd: string;
-    brief: string;
-  }): Promise<{ html: string; truncated: boolean } | null> => {
-    setGenerating(true);
-    setError(null);
-    setStatus('Generating page from brief...');
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const systemPrompt = getScratchPrompt();
-      const userText = `Build a complete standalone HTML page based on this creative brief and design system.
-
-=== CREATIVE BRIEF ===
-${args.brief}
-
-=== design.md ===
-${args.designMd}
-
-Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explanations before or after.`;
-
-      const onProgress = (chars: number) => {
-        setStatus(`Generating... ${(chars / 1000).toFixed(1)}K characters`);
-      };
-
-      const result = provider === 'openai'
-        ? await callOpenAIGenerate(activeKey, systemPrompt, userText, [], controller.signal)
-        : await streamAnthropic(activeKey, systemPrompt, userText, [], onProgress, controller.signal);
-
-      const html = extractHtmlDocument(result.text);
-      if (!html || html.length < 200) {
-        throw new Error('Model returned no usable HTML — try again.');
-      }
-
-      setStatus(result.truncated
-        ? 'Generated, but output hit the token limit — page may be cut off.'
-        : 'Page generated successfully.');
-
-      return { html, truncated: result.truncated };
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        setStatus('Generation cancelled.');
-        return null;
-      }
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      return null;
-    } finally {
-      setGenerating(false);
-      abortRef.current = null;
-    }
-  };
-
   const cancel = () => abortRef.current?.abort();
 
-  return { generate, generateFromScratch, cancel, generating, status, error };
+  return { generate, cancel, generating, status, error };
 }

@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
 import { HelpModal } from '../ui/HelpModal';
-import { UsageBadge } from './UsageBadge';
 
 interface Breadcrumb {
   label: string;
@@ -49,7 +48,6 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
       )}
 
       <div className="ml-auto flex items-center gap-2">
-        <UsageBadge />
         {rightSlot}
         <button
           onClick={() => setShowHelp(true)}
