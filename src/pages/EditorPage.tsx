@@ -464,9 +464,9 @@ export function EditorPage({ user }: EditorPageProps) {
               <>
                 {/* Create from Brief — inline panel */}
                 <CreatePanel
-                  provider={appSettings.provider}
-                  anthropicKey={appSettings.anthropicKey}
-                  openaiKey={appSettings.openaiKey}
+                  provider={appSettings.aiProvider}
+                  anthropicKey={appSettings.anthropicApiKey}
+                  openaiKey={appSettings.openaiApiKey}
                   inline={true}
                 />
 
