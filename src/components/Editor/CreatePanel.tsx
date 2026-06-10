@@ -40,12 +40,19 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false 
   };
 
   const handleGenerate = async () => {
-    if (!brief.trim()) return;
-    const result = await generateFromScratch({
-      designMd: designMd || '(no design.md provided — infer a clean modern design system from the brief)',
-      brief: brief.trim(),
-    });
-    if (result?.html) setGeneratedHtml(result.html);
+    console.log('[CreatePanel] handleGenerate called, brief length:', brief.trim().length);
+    console.log('[CreatePanel] provider:', provider, 'key present:', !!(provider === 'anthropic' ? anthropicKey : openaiKey));
+    if (!brief.trim()) { console.warn('[CreatePanel] empty brief'); return; }
+    try {
+      const result = await generateFromScratch({
+        designMd: designMd || '(no design.md provided — infer a clean modern design system from the brief)',
+        brief: brief.trim(),
+      });
+      console.log('[CreatePanel] result:', result ? `${result.html.length} chars` : 'null');
+      if (result?.html) setGeneratedHtml(result.html);
+    } catch (e) {
+      console.error('[CreatePanel] error:', e);
+    }
   };
 
   const handleDownload = () => {
