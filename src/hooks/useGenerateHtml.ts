@@ -11,7 +11,7 @@
 //   in-app generation uses the exact same instructions as the ZIP export.
 
 import { useState, useRef } from 'react';
-import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
+import { generateBlueprintMd, getMasterPrompt, getScratchPrompt } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
 import { usageStore } from '../lib/usage';
 import type { GlobalSettings, Page, Section, AIProvider } from '../types';
@@ -312,7 +312,64 @@ export function useGenerateHtml(provider: AIProvider, anthropicKey: string, open
     }
   };
 
+  // -----------------------------------------------------------------------
+  // Generate from scratch — design.md + creative brief, no blueprint
+  // -----------------------------------------------------------------------
+  const generateFromScratch = async (args: {
+    designMd: string;
+    brief: string;
+  }): Promise<{ html: string; truncated: boolean } | null> => {
+    setGenerating(true);
+    setError(null);
+    setStatus('Generating page from brief...');
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const systemPrompt = getScratchPrompt();
+      const userText = `Build a complete standalone HTML page based on this creative brief and design system.
+
+=== CREATIVE BRIEF ===
+${args.brief}
+
+=== design.md ===
+${args.designMd}
+
+Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explanations before or after.`;
+
+      const onProgress = (chars: number) => {
+        setStatus(`Generating... ${(chars / 1000).toFixed(1)}K characters`);
+      };
+
+      const result = provider === 'openai'
+        ? await callOpenAIGenerate(activeKey, systemPrompt, userText, [], controller.signal)
+        : await streamAnthropic(activeKey, systemPrompt, userText, [], onProgress, controller.signal);
+
+      const html = extractHtmlDocument(result.text);
+      if (!html || html.length < 200) {
+        throw new Error('Model returned no usable HTML — try again.');
+      }
+
+      setStatus(result.truncated
+        ? 'Generated, but output hit the token limit — page may be cut off.'
+        : 'Page generated successfully.');
+
+      return { html, truncated: result.truncated };
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        setStatus('Generation cancelled.');
+        return null;
+      }
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    } finally {
+      setGenerating(false);
+      abortRef.current = null;
+    }
+  };
+
   const cancel = () => abortRef.current?.abort();
 
-  return { generate, cancel, generating, status, error };
+  return { generate, generateFromScratch, cancel, generating, status, error };
 }
