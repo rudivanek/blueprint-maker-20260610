@@ -486,6 +486,43 @@ Return a valid JSON object:
 
 FOOTER RULE — MANDATORY: The footer object MUST be populated from the actual <footer> element in the HTML. An empty or minimal footer object is NEVER acceptable for a real website. Extract ALL columns, ALL links (with their href URLs), the address, phone, email, social links, and legal/privacy links. If the footer has 4 columns with 5 links each, output all 4 columns with all 5 links each.`;
 
+export function getScratchPrompt(): string {
+  return `You are building a client-facing website prototype based on a creative brief and optional design system. This is a clean single-file HTML prototype for client review and PDF export.
+
+## PURPOSE
+Generate a complete, well-structured webpage that matches the brief. Use the design.md tokens if provided; otherwise infer a clean modern design system.
+
+## OUTPUT REQUIREMENTS
+- Single self-contained HTML file
+- All CSS inside a <style> tag
+- No <script> tags. No JavaScript. Zero.
+- No @keyframes, no CSS transitions, no :hover rules
+- No external CSS frameworks (no Tailwind CDN, no Bootstrap)
+- Google Fonts links in <head> are allowed
+- Clean enough to convert to PDF without broken layouts
+
+## WHAT TO BUILD
+- Read the brief and identify the page type, industry, audience, and required sections
+- Build every section described in the brief
+- Use real, contextually appropriate placeholder text (no Lorem Ipsum)
+- Use placehold.co for images: https://placehold.co/[W]x[H]/[bg]/[fg]
+- Create a realistic nav and footer
+
+## DESIGN RULES
+- If design.md is provided: use its CSS variables for all colors, fonts, and spacing
+- If no design.md: create a clean, professional system appropriate for the brief's industry
+- Establish clear visual hierarchy: headings stand out, sections are visually distinct
+- Use consistent spacing (8px base unit)
+- Ensure all text is readable with sufficient contrast
+
+## BUILD RULES
+1. Build every section in a logical page flow
+2. Use CSS Grid and Flexbox for layouts — no floats
+3. Make it responsive with a mobile breakpoint at 768px
+4. Do not add JavaScript or animations
+5. Return ONLY the complete HTML document starting with <!DOCTYPE html>`;
+}
+
 export function getMasterPrompt(hasScreenshots = false): string {
   return `You are building a client-facing website prototype for Sharpen.Studio internal use. This is NOT production code — it is a clean single-file HTML prototype for client review and PDF export.
 
