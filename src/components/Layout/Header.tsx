@@ -49,6 +49,7 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
 
       <div className="ml-auto flex items-center gap-2">
         {rightSlot}
+        <span className="text-[10px] text-[#C4C9D4] font-medium select-none">Ver. 1.0</span>
         <button
           onClick={() => setShowHelp(true)}
           className="w-8 h-8 flex items-center justify-center text-[#9CA3AF] hover:text-[#2575FC] hover:bg-[#F9FAFB] transition-colors"
