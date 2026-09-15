@@ -727,3 +727,4 @@ export function EditorPage({ user }: EditorPageProps) {
     </div>
   );
 }
+
