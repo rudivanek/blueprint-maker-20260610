@@ -8,6 +8,7 @@ interface CreatePanelProps {
   provider: AIProvider;
   anthropicKey: string;
   openaiKey: string;
+  /** Kept for compatibility; the panel is always rendered inline. */
   inline?: boolean;
   /** Step 4: text from the New Project wizard (Describe preset) */
   initialBrief?: string;
@@ -22,7 +23,7 @@ const EXAMPLE_BRIEFS = [
   'Homepage for a boutique law firm specializing in corporate M&A. Dark navy and gold, hero with appointment CTA, practice areas grid, attorney profiles, contact form.',
 ];
 
-export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false, initialBrief = '', projectDesignMd = '', defaultOpen = false }: CreatePanelProps) {
+export function CreatePanel({ provider, anthropicKey, openaiKey, initialBrief = '', projectDesignMd = '', defaultOpen = false }: CreatePanelProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [brief, setBrief] = useState(initialBrief);
   const [uploadedDesignMd, setDesignMd] = useState('');
@@ -193,4 +194,3 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false,
     </div>
   );
 }
-
