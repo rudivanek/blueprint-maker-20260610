@@ -121,7 +121,7 @@
 
 /* ── Print / PDF rules ── */
 @media print {
-  @page { size: A4; margin: 16mm; }
+  @page { size: letter; margin: 0.6in; }
 
   body {
     background: #ffffff !important;
