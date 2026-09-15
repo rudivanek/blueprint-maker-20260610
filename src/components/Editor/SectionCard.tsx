@@ -402,3 +402,4 @@ export function SectionCard({ section, onUpdate, onDelete, dragHandleProps }: Se
     </div>
   );
 }
+
