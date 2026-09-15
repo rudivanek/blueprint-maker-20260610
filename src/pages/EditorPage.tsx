@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Layers, FileText, Download, Loader2, X, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Pencil, Eye, Wand2 } from 'lucide-react';
+import { Plus, Layers, FileText, Download, Loader2, X, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Pencil, Eye } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { useProject } from '../hooks/useProjects';
 import { usePages } from '../hooks/usePages';
@@ -727,4 +727,3 @@ export function EditorPage({ user }: EditorPageProps) {
     </div>
   );
 }
-
