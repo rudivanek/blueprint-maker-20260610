@@ -176,10 +176,18 @@ export interface Project {
   globals: GlobalSettings;
   design_md: string;
   screenshot_url: string;
+  /** Workflow chosen when the project was created ('' = older project, no preset) */
+  preset?: ProjectPreset | '';
+  /** Reference site whose look is used (restyle / describe / content presets) */
+  design_url?: string;
+  /** The user's own page description (describe) or written content (content) */
+  brief?: string;
   created_at: string;
   updated_at: string;
   pages?: Page[];
 }
+
+export type ProjectPreset = 'clone' | 'restyle' | 'describe' | 'content' | 'manual';
 
 export type AIProvider = 'anthropic' | 'openai';
 
@@ -341,4 +349,3 @@ export const SECTION_TEMPLATES: Record<string, Partial<Section>> = {
     ],
   },
 };
-
