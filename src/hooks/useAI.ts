@@ -474,7 +474,9 @@ export function useAI(provider: AIProvider, anthropicKey: string, openaiKey: str
   const generateDesignSystem = async (
     extractData: Record<string, unknown>,
     rawHtml: string,
-    screenshots: string[] = []
+    screenshots: string[] = [],
+    /** Markdown digest from the extract-design-tokens edge function (measured CSS). */
+    cssEvidence?: string
   ): Promise<string | null> => {
     setLoading(true);
     setError(null);
@@ -497,6 +499,13 @@ export function useAI(provider: AIProvider, anthropicKey: string, openaiKey: str
         ? `\n\nIMPORTANT: ${screenshots.length} full-page screenshot slice(s) of the rendered page are attached above (top-to-bottom). Use them as the AUTHORITATIVE source for actual rendered colors (nav background, button colors, section backgrounds, text colors) and visual font characteristics (serif vs sans-serif, weight). The CSS text below may contain unused rules — the screenshot shows what is actually rendered. If the CSS and the screenshot disagree, trust the screenshot.`
         : '';
 
+      // With measured evidence from the real stylesheets, the raw inline CSS is
+      // only supporting material — keep it smaller to leave room for the evidence.
+      const inlineCssBudget = cssEvidence ? 40000 : 80000;
+      const evidenceBlock = cssEvidence
+        ? `\n\n${cssEvidence}\n\nThe CSS EVIDENCE above was measured from ALL of the site's stylesheets (linked, preloaded and @imported), not just the inline blocks below. Treat it as the primary source for exact hex values, font families, font sizes, weights, radii and spacing.\n`
+        : '';
+
       const userText = `Here is the branding extract data from the website:
 \`\`\`json
 ${JSON.stringify(extractData, null, 2)}
@@ -504,13 +513,13 @@ ${JSON.stringify(extractData, null, 2)}
 
 Here are the CSS blocks extracted from the page:
 \`\`\`css
-${cssBlocks.slice(0, 8).join('\n\n').substring(0, 80000)}
+${cssBlocks.slice(0, 8).join('\n\n').substring(0, inlineCssBudget)}
 \`\`\`
 
 Sample inline styles found:
 \`\`\`
 ${inlineStyles.slice(0, 80).join('\n')}
-\`\`\`${screenshotNote}
+\`\`\`${evidenceBlock}${screenshotNote}
 
 Please generate the complete design.md file following the exact format specified in the system prompt. Resolve ALL CSS variables to their actual hex values.`;
 

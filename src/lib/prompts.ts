@@ -51,6 +51,15 @@ For headline sizes, extract the ACTUAL computed font-size from H1, H2, H3 elemen
 
 NEVER write "default size" or "None" as a font size. If you truly cannot determine the exact value, write a reasonable inferred value (H1: 48px, H2: 36px, H3: 28px, H4: 22px) rather than leaving it blank.
 
+### Measured CSS Evidence (when provided)
+The user message may contain a block titled "CSS EVIDENCE". It was measured by downloading every stylesheet of the live site. When it is present:
+- Take hex values, font families, font sizes, weights, radii and spacing from it. Prefer values with high counts (×N) and values listed under the matching element role (body, headings, links, buttons, header/nav, footer).
+- Use the screenshot to decide which measured colours are prominent (brand, CTA, section backgrounds). Do not invent a colour that appears in neither the evidence nor the screenshot.
+- Hover/focus colours belong in hover states; dark-mode-only colours must not become the main palette.
+- Fonts listed under "Google Fonts loaded" or "Self-hosted @font-face" are real. Use their exact names; include the Google Fonts URL or the @font-face file URL in the Typography section.
+- Any value you had to guess (for example a full grey scale or semantic colours the site does not use) must be marked "(inferred)" in the Usage column.
+- If the evidence says "CSS LOOKS INCOMPLETE", say so in one line at the top of the design.md and rely more on the screenshot.
+
 ### General
 - Resolve ALL CSS variables to their actual hex/rgb values. NEVER output var(--color-x) — trace variables to their root values.
 - Be extremely specific — exact px values, exact hex codes, exact font weights.

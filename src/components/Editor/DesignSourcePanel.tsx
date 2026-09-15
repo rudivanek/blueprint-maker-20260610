@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
-import { Link, ExternalLink, Upload, Code, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Link, ExternalLink, Upload, Code, Loader2, AlertCircle, CheckCircle, Ruler } from 'lucide-react';
 import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { ding } from '../../lib/ding';
+import { fetchDesignTokens, summarizeTokens } from '../../lib/designTokens';
 import type { AppSettings } from '../../types';
 
 interface DesignSourcePanelProps {
@@ -21,6 +22,8 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated }
   const [pastedHtml, setPastedHtml] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [statusMsg, setStatusMsg] = useState('');
+  // Result of the stylesheet measurement (extract-design-tokens edge function)
+  const [cssSummary, setCssSummary] = useState<{ text: string; warning: string | null } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const firecrawl = useFirecrawl(appSettings.firecrawlApiKey);
@@ -44,12 +47,35 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated }
       const crawlResult = await firecrawl.scrapeForDesign(url);
       if (!crawlResult) throw new Error(firecrawl.error || 'Firecrawl failed');
 
-      // Prepare up to 3 screenshot slices as visual ground truth for colors/fonts
-      setStatusMsg('Preparing screenshot for visual analysis...');
-      const screenshotSlices = await prepareScreenshotForAI(crawlResult.screenshot, 3);
+      // In parallel: screenshot slices (visual ground truth) and measured CSS
+      // from the site's real stylesheets (exact values). The CSS step is
+      // optional — if it fails, extraction continues without it.
+      setStatusMsg('Reading stylesheets and preparing screenshot...');
+      setCssSummary(null);
+      const [screenshotSlices, tokens] = await Promise.all([
+        prepareScreenshotForAI(crawlResult.screenshot, 3),
+        fetchDesignTokens(url, crawlResult.rawHtml),
+      ]);
 
-      setStatusMsg(`Analyzing design system with ${providerLabel}${screenshotSlices.length > 0 ? ' (with visual reference)' : ''}...`);
-      const designMd = await ai.generateDesignSystem(crawlResult.extract, crawlResult.rawHtml, screenshotSlices);
+      if (tokens.data) {
+        const d = tokens.data.diagnostics;
+        const warnings = [
+          d.cssLooksInsufficient ? `CSS looks incomplete: ${d.insufficientReasons.join('; ')}` : '',
+          tokens.data.fonts.jsLoadedSuspected ? 'Fonts may be loaded by JavaScript — check fonts in design.md' : '',
+        ].filter(Boolean);
+        setCssSummary({ text: summarizeTokens(tokens.data), warning: warnings.length ? warnings.join(' · ') : null });
+      } else {
+        setCssSummary({ text: 'Stylesheets not measured', warning: `${tokens.error ?? 'Unknown error'} — using inline CSS and screenshot only.` });
+      }
+
+      const sources = [screenshotSlices.length > 0 ? 'screenshot' : '', tokens.data ? 'measured CSS' : ''].filter(Boolean);
+      setStatusMsg(`Analyzing design system with ${providerLabel}${sources.length ? ` (with ${sources.join(' + ')})` : ''}...`);
+      const designMd = await ai.generateDesignSystem(
+        crawlResult.extract,
+        crawlResult.rawHtml,
+        screenshotSlices,
+        tokens.data?.digest,
+      );
       if (!designMd) throw new Error(ai.error || 'AI failed to generate design system');
 
       onDesignGenerated(designMd);
@@ -245,8 +271,20 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated }
             {status === 'success' && !isLoading && <CheckCircle className="w-3 h-3 text-green-600 shrink-0" />}
             {status === 'error' && !isLoading && <AlertCircle className="w-3 h-3 text-red-600 shrink-0" />}
             <p className={`text-[11px] truncate ${status === 'error' ? 'text-red-600' : status === 'success' ? 'text-green-600' : 'text-[#9CA3AF]'}`}>
-              {ai.status || firecrawl.status || statusMsg}
+              {status === 'loading' ? (statusMsg || ai.status || firecrawl.status) : statusMsg}
             </p>
+          </div>
+        )}
+
+        {cssSummary && (mode === 'page-url' || mode === 'different-url') && (
+          <div className={`border px-3 py-2 ${cssSummary.warning ? 'bg-amber-50 border-amber-200' : 'bg-[#F9FAFB] border-[#E5E7EB]'}`}>
+            <div className="flex items-start gap-2">
+              <Ruler className={`w-3 h-3 shrink-0 mt-0.5 ${cssSummary.warning ? 'text-amber-500' : 'text-[#2575FC]'}`} />
+              <div className="min-w-0">
+                <p className="text-[11px] text-[#111827] break-words">{cssSummary.text}</p>
+                {cssSummary.warning && <p className="text-[11px] text-amber-700 break-words mt-0.5">{cssSummary.warning}</p>}
+              </div>
+            </div>
           </div>
         )}
       </div>
