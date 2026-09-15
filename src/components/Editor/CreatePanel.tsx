@@ -9,6 +9,11 @@ interface CreatePanelProps {
   anthropicKey: string;
   openaiKey: string;
   inline?: boolean;
+  /** Step 4: text from the New Project wizard (Describe preset) */
+  initialBrief?: string;
+  /** Step 4: the project's design.md, used when no file is uploaded */
+  projectDesignMd?: string;
+  defaultOpen?: boolean;
 }
 
 const EXAMPLE_BRIEFS = [
@@ -26,10 +31,10 @@ function extractHtml(raw: string): string {
   return raw.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
-export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false }: CreatePanelProps) {
-  const [open, setOpen] = useState(false);
-  const [brief, setBrief] = useState('');
-  const [designMd, setDesignMd] = useState('');
+export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false, initialBrief = '', projectDesignMd = '', defaultOpen = false }: CreatePanelProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [brief, setBrief] = useState(initialBrief);
+  const [uploadedDesignMd, setDesignMd] = useState('');
   const [designMdName, setDesignMdName] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -37,6 +42,9 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false 
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // An uploaded file wins; otherwise the project's own design.md is used.
+  const designMd = uploadedDesignMd || projectDesignMd;
+  const usingProjectDesign = !uploadedDesignMd && !!projectDesignMd;
   const abortRef = useRef<AbortController | null>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,7 +203,16 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false 
 
           <div>
             <label className="block text-[10px] font-semibold text-[#374151] uppercase tracking-wide mb-1">Design.md <span className="text-[#9CA3AF] font-normal normal-case">(optional but recommended)</span></label>
-            {designMd ? (
+            {usingProjectDesign ? (
+              <div className="flex items-center justify-between px-3 py-2 bg-indigo-50 border border-indigo-200 rounded">
+                <div className="flex items-center gap-2">
+                  <CheckCircle size={12} className="text-indigo-500" />
+                  <span className="text-[11px] font-medium text-indigo-700">Project design.md</span>
+                  <span className="text-[10px] text-indigo-400">({(designMd.length / 1000).toFixed(1)}K)</span>
+                </div>
+                <button onClick={() => fileInputRef.current?.click()} className="text-[10px] text-indigo-500 hover:underline">Use another file</button>
+              </div>
+            ) : designMd ? (
               <div className="flex items-center justify-between px-3 py-2 bg-indigo-50 border border-indigo-200 rounded">
                 <div className="flex items-center gap-2">
                   <CheckCircle size={12} className="text-indigo-500" />
