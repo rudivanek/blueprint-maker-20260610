@@ -22,11 +22,12 @@ export function useProjects(userId: string | undefined) {
     setLoading(true);
     const { data, error } = await supabase
       .from('projects')
-      .select('*')
+      // The list only needs card fields (design.md and globals are loaded in the editor).
+      .select('id, user_id, name, url, screenshot_url, preset, created_at, updated_at')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false });
     if (error) setError(error.message);
-    else setProjects(data as Project[]);
+    else setProjects(data as unknown as Project[]);
     setLoading(false);
   }, [userId]);
 
