@@ -76,6 +76,7 @@ export interface TokenResult {
     sheetsFailed: SheetFailure[];
     sheets: SheetInfo[];
     vendorSheets: number;       // plugin/library sheets excluded from colour & type evidence
+    unusedRulesSkipped: number; // rules whose selectors match nothing on the page
     totalCssBytes: number;
     cssLooksInsufficient: boolean;
     insufficientReasons: string[];
@@ -473,6 +474,24 @@ export function isVendorSelector(selector: string): boolean {
   const parts = selector.split(',').map(s => s.trim()).filter(Boolean);
   return parts.length > 0 && parts.every(s => VENDOR_SELECTOR_RE.test(s));
 }
+/** Class names / ids a selector needs, ignoring pseudo-class arguments and attribute selectors. */
+function selectorNeeds(part: string): { classes: string[]; ids: string[] } {
+  let p = part;
+  for (let k = 0; k < 3; k++) p = p.replace(/\([^()]*\)/g, '');
+  p = p.replace(/\[[^\]]*\]/g, '');
+  const unesc = (x: string) => x.replace(/\\/g, '');
+  return {
+    classes: [...p.matchAll(/\.((?:\\.|[\w-])+)/g)].map(m => unesc(m[1])),
+    ids: [...p.matchAll(/#((?:\\.|[\w-])+)/g)].map(m => unesc(m[1])),
+  };
+}
+/** True when at least one comma-part of the selector can match the page's rendered HTML. */
+export function selectorUsedOnPage(selector: string, classes: Set<string>, ids: Set<string>): boolean {
+  return selector.split(',').some(part => {
+    const need = selectorNeeds(part);
+    return need.classes.every(c => classes.has(c)) && need.ids.every(i => ids.has(i));
+  });
+}
 // Platform utility selectors that carry default palettes, not brand choices.
 const PLATFORM_CHROME_RE = /^\.w-(form|input|webflow-badge|file-upload)|^\.wp-block-(?!button)|^\.elementor-widget-container|^#wpadminbar|\.screen-reader-text|\.has-[\w-]+-(color|background-color|gradient-background|border-color)\b|^:root\s+:where\(/;
 const DARK_RE = /prefers-color-scheme\s*:\s*dark/i;
@@ -625,7 +644,7 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
     const key = `${cp.selector}::${cp.name}`;
     if (cpSeen.has(key)) continue;
     cpSeen.add(key);
-    if (cp.prio === 9 || cp.name.startsWith('--wp--preset--') || cp.name.startsWith('--tw-')) continue;
+    if (cp.prio === 9 || /^--(fluentform|ff-|el-|swiper|uk-|bdt-|select2|wc-|woocommerce|cky|cmplz|e-a-|wp-admin)/i.test(cp.name) || cp.name.startsWith('--wp--preset--') || cp.name.startsWith('--tw-')) continue;
     cpList.push({ name: cp.name, value: cp.value, selector: cp.selector });
   }
 
@@ -646,6 +665,17 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
   const fontFaces: FontFace[] = [];
   const ffSeen = new Set<string>();
   const selectorTokens = new Set<string>();
+
+  // Classes / ids present in the rendered page. CSS rules that can't match anything on the
+  // page (unused plugin or theme CSS) are left out of the colour and type evidence.
+  const bodyHtml = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html;
+  const bodyTokens = new Set<string>();
+  for (const m of html.matchAll(/\sclass\s*=\s*["']([^"']+)["']/gi)) for (const t of m[1].split(/\s+/)) if (t) bodyTokens.add(decodeEntities(t));
+  const bodyIds = new Set<string>();
+  for (const m of html.matchAll(/\sid\s*=\s*["']([^"']+)["']/gi)) bodyIds.add(decodeEntities(m[1].trim()));
+  const usedFilter = bodyTokens.size > 20;
+  let unusedRulesSkipped = 0;
+  const referencedVars = new Set<string>();
 
   for (const p of parsed) {
     // @font-face (vendor sheets included — icon fonts filtered below)
@@ -671,6 +701,8 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
       const sel = rule.selector;
       for (const t of sel.matchAll(/[.#]([\w-]+)/g)) selectorTokens.add(t[1]);
       if (p.vendor || PLATFORM_CHROME_RE.test(sel) || isVendorSelector(sel)) continue;
+      if (usedFilter && !selectorUsedOnPage(sel, bodyTokens, bodyIds)) { unusedRulesSkipped++; continue; }
+      for (const [, v] of rule.decls) for (const m of v.matchAll(/var\(\s*(--[\w-]+)/g)) referencedVars.add(m[1]);
 
       const mediaCtx = rule.context.find(c => /^@media/i.test(c));
       for (const bp of (mediaCtx ?? '').matchAll(/(min|max)-width\s*:\s*([\d.]+(px|em|rem))/gi)) bps.add(`${bp[1]}-width: ${bp[2]}`, sel);
@@ -753,11 +785,8 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
 
   // 5. Diagnostics
   const insufficientReasons: string[] = [];
-  const bodyHtml = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html;
   if (totalCssBytes < 20_000 && bodyHtml.length > 100_000) insufficientReasons.push(`only ${Math.round(totalCssBytes / 1024)} KB of CSS for a ${Math.round(bodyHtml.length / 1024)} KB page`);
   if (cpList.length === 0 && colors.size < 6) insufficientReasons.push(`no custom properties and only ${colors.size} colours found`);
-  const bodyTokens = new Set<string>();
-  for (const m of bodyHtml.matchAll(/\sclass\s*=\s*["']([^"']+)["']/gi)) for (const t of m[1].split(/\s+/)) if (t) bodyTokens.add(t);
   if (bodyTokens.size > 20) {
     let hit = 0;
     for (const t of bodyTokens) if (selectorTokens.has(t)) hit++;
@@ -769,6 +798,17 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
   const vendorSheets = sources.filter(s => s.vendor).length;
 
   const platform = detectPlatform(html, parsed.map(p => p.css).join('\n').slice(0, 2_000_000), linked);
+
+  // Tokens actually used by the page: referenced from used rules, directly or through other variables.
+  const queueVars = [...referencedVars];
+  while (queueVars.length) {
+    const v = vars.get(queueVars.pop()!);
+    if (!v) continue;
+    for (const m of v.matchAll(/var\(\s*(--[\w-]+)/g)) if (!referencedVars.has(m[1])) { referencedVars.add(m[1]); queueVars.push(m[1]); }
+  }
+  const tokenList = usedFilter
+    ? cpList.filter(cp => referencedVars.has(cp.name) || /\.elementor-kit-\d+/.test(cp.selector))
+    : cpList;
 
   const roleOrder = ['body', 'headings', 'links', 'buttons', 'header/nav', 'footer'];
   const roleList: RoleEvidence[] = roleOrder.filter(r => roles.has(r)).map(r => {
@@ -782,7 +822,7 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
 
   const result: TokenResult = {
     pageUrl,
-    customProperties: cpList.slice(0, 400).map(cp => ({ ...cp, resolved: resolveVars(cp.value, vars) })),
+    customProperties: tokenList.slice(0, 400).map(cp => ({ ...cp, resolved: resolveVars(cp.value, vars) })),
     colors: colors.top(40),
     stateColors: stateColors.top(15),
     darkModeColors: darkColors.top(15),
@@ -802,6 +842,7 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
       sheetsFailed,
       sheets,
       vendorSheets,
+      unusedRulesSkipped,
       totalCssBytes,
       cssLooksInsufficient: insufficientReasons.length > 0,
       insufficientReasons,
@@ -827,6 +868,7 @@ export function buildDigest(r: TokenResult): string {
   L.push(`Source: ${r.pageUrl}`);
   L.push(`Platform: cms=${r.platform.cms ?? 'unknown'}, builder=${r.platform.builder ?? 'none'}, framework=${r.platform.framework ?? 'none'}, css=${r.platform.cssApproach}`);
   L.push(`Stylesheets: ${d.sheetsFetchedOk}/${d.linkedSheetsFound} linked sheets downloaded, ${d.sheets.filter(s => s.inline).length} inline blocks, ${Math.round(d.totalCssBytes / 1024)} KB total.`);
+  if (d.unusedRulesSkipped) L.push(`${d.unusedRulesSkipped} CSS rules were ignored because they match nothing on this page.`);
   if (d.vendorSheets) L.push(`${d.vendorSheets} plugin/library stylesheets were ignored for colours and type (their defaults are not the brand).`);
   if (d.cssLooksInsufficient) L.push(`⚠ CSS LOOKS INCOMPLETE: ${d.insufficientReasons.join('; ')}. Rely more on the screenshot and mark guessed values as (inferred).`);
   L.push('Counts (×N) = number of CSS rules using the value. Higher count = more likely a real brand token.');
