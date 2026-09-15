@@ -604,7 +604,9 @@ The layout_contract fields mean:
 
 ## FILES PROVIDED
 1. **design.md** — design tokens: colors, fonts, spacing. Use CSS variables. Never hardcode values.
-2. **blueprint.md** — page structure. Section order is exact.${hasScreenshots ? '\n3. **screenshot.jpg** — visual reference. Highest authority on layout intent. Use it to verify column counts and image positions.' : ''}
+2. **blueprint.md** — page structure. Section order is exact.
+- **copy.md** (if attached) — the exact text of the original page, captured without AI. When blueprint copy and copy.md disagree, copy.md wins. Never invent numbers, testimonials, client names or claims.
+- **images.md** (if attached) — real image URLs grouped by section. Use them in those sections.${hasScreenshots ? '\n3. **screenshot.jpg** — visual reference. Highest authority on layout intent. Use it to verify column counts and image positions.' : ''}
 
 ## BUILD PROCESS
 For each section:
@@ -732,3 +734,4 @@ ${pageCustomInstructions ?? page.custom_instructions}
 
 ${sectionsContent}`;
 }
+
