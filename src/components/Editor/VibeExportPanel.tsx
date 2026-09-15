@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Copy, ExternalLink, CheckCircle, Wand2, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { buildVibePrompt, VIBE_TARGETS, VibeTarget } from '../../lib/vibePrompt';
 
