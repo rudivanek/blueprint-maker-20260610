@@ -15,9 +15,11 @@ import { ImportPanel } from '../components/Editor/ImportPanel';
 import { CreatePanel } from '../components/Editor/CreatePanel';
 import { ExportPanel } from '../components/Export/ExportPanel';
 import { PreviewPanel } from '../components/Editor/PreviewPanel';
+import { PresetGuide } from '../components/Editor/PresetGuide';
+import { getPreset, type GuideStepId } from '../lib/presets';
 import { loadSettings } from '../lib/settings';
 import { SECTION_TEMPLATES } from '../types';
-import type { GlobalSettings, Section, Page } from '../types';
+import type { GlobalSettings, Section, Page, ProjectPreset } from '../types';
 
 interface EditorPageProps {
   user: User;
@@ -198,6 +200,21 @@ export function EditorPage({ user }: EditorPageProps) {
     }
   };
 
+  // Step 4 — preset guide navigation
+  const handleGuideGo = (step: GuideStepId) => {
+    const scrollTo = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    if (step === 'design') setActivePanel('design');
+    else if (step === 'preview') setActivePanel('preview');
+    else if (step === 'export') setActivePanel('export');
+    else if (step === 'structure') { setActivePanel('sections'); scrollTo('bpm-import-panel'); }
+    else if (step === 'brief') { setActivePanel('sections'); scrollTo('bpm-brief-panel'); }
+  };
+
+  const handlePresetChange = async (preset: ProjectPreset) => {
+    await updateProject({ preset });
+    triggerSaved();
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -232,6 +249,8 @@ export function EditorPage({ user }: EditorPageProps) {
   }
 
   const activePage = pages.find(p => p.id === activePageId) || null;
+  const presetDef = getPreset(project.preset);
+  const presetKey = project.preset || 'none';
   const allSectionsMap: Record<string, Section[]> = { ...allSectionsRef.current };
   allSectionsMap[activePageId || ''] = sections;
 
@@ -310,6 +329,8 @@ export function EditorPage({ user }: EditorPageProps) {
                       projectUrl={project.url}
                       appSettings={appSettings}
                       onDesignGenerated={handleDesignGenerated}
+                      initialMode={presetDef && presetDef.id !== 'manual' ? (project.design_url ? 'different-url' : presetDef.designStart === 'different-url' ? 'upload' : 'page-url') : undefined}
+                      initialOtherUrl={project.design_url || ''}
                     />
                   }
                 />
@@ -470,22 +491,62 @@ export function EditorPage({ user }: EditorPageProps) {
               </div>
             ) : (
               <>
-                {/* Create from Brief — inline panel */}
-                <CreatePanel
-                  provider={appSettings.aiProvider}
-                  anthropicKey={appSettings.anthropicApiKey}
-                  openaiKey={appSettings.openaiApiKey}
-                  inline={true}
+                {/* Step 4 — workflow guide */}
+                <PresetGuide
+                  projectId={project.id}
+                  preset={project.preset}
+                  designUrl={project.design_url}
+                  done={{
+                    design: !!project.design_md?.trim(),
+                    structure: sections.length > 0,
+                    preview: !!activePage.generated_html,
+                  }}
+                  onGo={handleGuideGo}
+                  onChangePreset={handlePresetChange}
                 />
 
+                {presetDef?.id === 'describe' && (
+                  <div id="bpm-brief-panel" className="scroll-mt-4">
+                    <CreatePanel
+                      key={`brief-${presetKey}`}
+                      provider={appSettings.aiProvider}
+                      anthropicKey={appSettings.anthropicApiKey}
+                      openaiKey={appSettings.openaiApiKey}
+                      inline={true}
+                      initialBrief={project.brief || ''}
+                      projectDesignMd={project.design_md}
+                      defaultOpen={true}
+                    />
+                  </div>
+                )}
+
                 {/* Per-page import */}
-                <ImportPanel
-                  projectUrl={project.url}
-                  pageUrl={activePage.page_url || ''}
-                  appSettings={appSettings}
-                  onStructureImported={handleStructureImported}
-                  onPageUrlChange={handlePageUrlChange}
-                />
+                <div id="bpm-import-panel" className="scroll-mt-4">
+                  <ImportPanel
+                    key={`import-${activePage.id}-${presetKey}`}
+                    projectUrl={project.url}
+                    pageUrl={activePage.page_url || ''}
+                    appSettings={appSettings}
+                    onStructureImported={handleStructureImported}
+                    onPageUrlChange={handlePageUrlChange}
+                    initialSource={presetDef?.importStart === 'paste' ? 'paste' : 'url'}
+                    initialContent={presetDef?.id === 'content' ? (project.brief || '') : ''}
+                    pageName={activePage.page_name}
+                  />
+                </div>
+
+                {/* Create from Brief — inline panel (other workflows: collapsed, below Import) */}
+                {presetDef?.id !== 'describe' && (
+                  <div id="bpm-brief-panel" className="scroll-mt-4">
+                    <CreatePanel
+                      provider={appSettings.aiProvider}
+                      anthropicKey={appSettings.anthropicApiKey}
+                      openaiKey={appSettings.openaiApiKey}
+                      inline={true}
+                      projectDesignMd={project.design_md}
+                    />
+                  </div>
+                )}
 
                 {/* Page info bar */}
                 <div className="bg-white border border-[#E5E7EB] px-4 py-3 mb-4">
@@ -651,4 +712,3 @@ export function EditorPage({ user }: EditorPageProps) {
     </div>
   );
 }
-
