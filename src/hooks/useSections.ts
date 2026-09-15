@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Section } from '../types';
-import { DEFAULT_COPY, DEFAULT_LAYOUT_CONTRACT, normalizeLayoutContract } from '../types';
+import { DEFAULT_COPY, normalizeLayoutContract } from '../types';
 
 function normalizeSection(raw: Record<string, unknown>): Section {
   return {
-    ...(raw as Section),
+    ...(raw as unknown as Section),
     layout_contract: normalizeLayoutContract(raw.layout_contract),
   };
 }
