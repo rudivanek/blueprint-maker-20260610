@@ -194,3 +194,4 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, initialBrief = 
     </div>
   );
 }
+
