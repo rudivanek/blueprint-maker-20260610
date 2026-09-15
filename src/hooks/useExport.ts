@@ -2,6 +2,7 @@ import { useState } from 'react';
 import JSZip from 'jszip';
 import type { Project, Page, Section } from '../types';
 import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
+import { checkFabrication, factCheckMd } from '../lib/pageAssets';
 
 async function screenshotToBase64(data: string): Promise<string> {
   if (data.startsWith('data:')) return data.split(',')[1];
@@ -52,6 +53,14 @@ export function useExport() {
           : 'blueprint.md';
         zip.file(filename, blueprintMd);
 
+        // Verbatim copy, real images and the fact check (only when captured at import)
+        const suffix = multiPage ? `-${page.slug || page.page_name.toLowerCase().replace(/\s+/g, '-')}` : '';
+        if (page.copy_md) {
+          zip.file(`copy${suffix}.md`, page.copy_md);
+          zip.file(`fact-check${suffix}.md`, factCheckMd(page.page_name, checkFabrication(sections, page.copy_md)));
+        }
+        if (page.images_md) zip.file(`images${suffix}.md`, page.images_md);
+
         const screenshotData = activeScreenshotMap[page.id];
         if (screenshotData) {
           const base64 = await screenshotToBase64(screenshotData);
@@ -77,6 +86,16 @@ Date: ${new Date().toISOString().split('T')[0]}
 ${multiPage
   ? pages.map(p => `- blueprint-${p.slug}.md — ${p.page_name} page structure`).join('\n')
   : '- blueprint.md — Page structure and section definitions'}
+${pages.some(p => p.copy_md)
+  ? (multiPage
+      ? pages.filter(p => p.copy_md).map(p => `- copy-${p.slug}.md — ${p.page_name}: exact page text (use verbatim)\n- fact-check-${p.slug}.md — ${p.page_name}: blueprint text not found on the real page`).join('\n')
+      : '- copy.md — Exact page text, captured without AI (use verbatim)\n- fact-check.md — Blueprint text not found on the real page (review before publishing)')
+  : ''}
+${pages.some(p => p.images_md)
+  ? (multiPage
+      ? pages.filter(p => p.images_md).map(p => `- images-${p.slug}.md — ${p.page_name}: real image URLs by section`).join('\n')
+      : '- images.md — Real image URLs, grouped by section')
+  : ''}
 ${screenshotPages.length > 0
   ? (multiPage
       ? screenshotPages.map(p => `- screenshot-${p.slug}.jpg — ${p.page_name} visual reference`).join('\n')
@@ -86,7 +105,7 @@ ${screenshotPages.length > 0
 ## How to Use
 1. Open your AI tool of choice
 2. Copy the contents of prompt.txt as your opening message
-3. Attach design.md and the blueprint.md file(s)
+3. Attach design.md, the blueprint.md file(s) and — if present — copy.md and images.md
 ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual reference\n5. Hit send and review the output' : '4. Hit send and review the output'}
 `;
       zip.file('README.txt', readme);
