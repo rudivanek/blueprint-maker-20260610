@@ -1,7 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Project, GlobalSettings } from '../types';
+import type { Project, GlobalSettings, ProjectPreset } from '../types';
 import { DEFAULT_GLOBALS } from '../types';
+
+export interface NewProjectExtras {
+  preset?: ProjectPreset;
+  design_url?: string;
+  brief?: string;
+  /** e.g. a design.md uploaded in the wizard (restyle preset) */
+  design_md?: string;
+  firstPage?: { name: string; slug: string; url?: string };
+}
 
 export function useProjects(userId: string | undefined) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -23,19 +32,45 @@ export function useProjects(userId: string | undefined) {
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
-  const createProject = async (name: string, url: string): Promise<Project | null> => {
+  const createProject = async (
+    name: string,
+    url: string,
+    extras: NewProjectExtras = {},
+  ): Promise<Project | null> => {
     if (!userId) return null;
-    const { data, error } = await supabase
-      .from('projects')
-      .insert({ user_id: userId, name, url, globals: DEFAULT_GLOBALS, design_md: '', screenshot_url: '' })
-      .select()
-      .single();
-    if (error) { setError(error.message); return null; }
+    const base = { user_id: userId, name, url, globals: DEFAULT_GLOBALS, design_md: extras.design_md ?? '', screenshot_url: '' };
+    const withPreset = { ...base, preset: extras.preset ?? '', design_url: extras.design_url ?? '', brief: extras.brief ?? '' };
+
+    let { data, error } = await supabase.from('projects').insert(withPreset).select().single();
+    // If the preset migration has not been applied yet, still create the project.
+    if (error && /preset|design_url|brief/i.test(error.message)) {
+      console.warn('Preset columns missing — run the Step 4 migration. Creating project without preset.', error.message);
+      ({ data, error } = await supabase.from('projects').insert(base).select().single());
+    }
+    if (error || !data) { setError(error?.message ?? 'Could not create project'); return null; }
+
+    // Presets start with a first page so the editor opens ready to work.
+    if (extras.firstPage) {
+      const { error: pageErr } = await supabase.from('pages').insert({
+        project_id: (data as Project).id,
+        page_name: extras.firstPage.name,
+        slug: extras.firstPage.slug,
+        purpose: '',
+        primary_cta: '',
+        seo_title: '',
+        seo_description: '',
+        screenshot_url: '',
+        sort_order: 0,
+        page_url: extras.firstPage.url ?? '',
+      });
+      if (pageErr) console.warn('Could not create first page:', pageErr.message);
+    }
+
     await fetchProjects();
     return data as Project;
   };
 
-  const updateProject = async (id: string, updates: Partial<Pick<Project, 'name' | 'url' | 'globals' | 'design_md' | 'screenshot_url'>>) => {
+  const updateProject = async (id: string, updates: Partial<Pick<Project, 'name' | 'url' | 'globals' | 'design_md' | 'screenshot_url' | 'preset' | 'design_url' | 'brief'>>) => {
     const { error } = await supabase.from('projects').update(updates).eq('id', id);
     if (error) setError(error.message);
     else setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
