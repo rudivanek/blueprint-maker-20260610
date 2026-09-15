@@ -18,6 +18,8 @@ import { PreviewPanel } from '../components/Editor/PreviewPanel';
 import { PresetGuide } from '../components/Editor/PresetGuide';
 import { getPreset, type GuideStepId } from '../lib/presets';
 import { loadSettings } from '../lib/settings';
+import { setUsageProject } from '../lib/aiProxy';
+import { useKeyStatus } from '../hooks/useKeyStatus';
 import { SECTION_TEMPLATES } from '../types';
 import type { GlobalSettings, Section, Page, ProjectPreset } from '../types';
 
@@ -30,7 +32,14 @@ type ActivePanel = 'sections' | 'design' | 'export' | 'preview';
 export function EditorPage({ user }: EditorPageProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const appSettings = loadSettings();
+  // Step 5: keys are on the server; the key fields only flag availability.
+  const keyStatus = useKeyStatus();
+  const appSettings = {
+    ...loadSettings(),
+    anthropicApiKey: keyStatus.has.anthropic ? 'server' : '',
+    openaiApiKey: keyStatus.has.openai ? 'server' : '',
+    firecrawlApiKey: keyStatus.has.firecrawl ? 'server' : '',
+  };
   const { project, loading: projectLoading, updateGlobals, updateDesignMd, updateProject } = useProject(projectId);
   const { pages, loading: pagesLoading, createPage, updatePage, deletePage, reorderPages } = usePages(projectId);
   const [activePageId, setActivePageId] = useState<string | null>(null);
@@ -50,6 +59,12 @@ export function EditorPage({ user }: EditorPageProps) {
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const allSectionsRef = useRef<Record<string, Section[]>>({});
+
+  // Usage log: tag every AI call / scrape with this project
+  useEffect(() => {
+    setUsageProject(projectId);
+    return () => setUsageProject(null);
+  }, [projectId]);
 
   useEffect(() => {
     if (pages.length > 0 && !activePageId) {
@@ -712,4 +727,3 @@ export function EditorPage({ user }: EditorPageProps) {
     </div>
   );
 }
-
