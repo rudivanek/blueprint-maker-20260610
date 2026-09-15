@@ -212,3 +212,4 @@ export function contentToHtml(md: string): string {
 export function contentToCopyMd(md: string, pageName: string): string {
   return `# Copy — ${pageName}\nTexto escrito por el cliente. Úsalo tal cual; no lo reescribas ni inventes datos.\n\n${md.trim()}\n\n<!-- END OF COPY -->\n`;
 }
+
