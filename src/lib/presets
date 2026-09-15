@@ -1,0 +1,214 @@
+// src/lib/presets.ts
+//
+// Step 4 — "What do you want to do?" presets for new projects.
+// Ported from web-scrapper's DesignExtractor presets. Each preset decides
+// which inputs the New Project wizard asks for and how the editor starts:
+// which Design Source mode is pre-selected, whether the Import panel starts on
+// "From URL" or "Paste my content", and whether Generate from Brief is open.
+
+import type { ProjectPreset } from '../types';
+
+export type DesignStart = 'page-url' | 'different-url' | 'upload';
+export type ImportStart = 'url' | 'paste' | 'none';
+
+export interface PresetDef {
+  id: ProjectPreset;
+  title: string;
+  desc: string;
+  /** Asks for the site whose CONTENT is used */
+  needsContentUrl: boolean;
+  /** Asks for a reference site whose LOOK is used (or a design.md file for restyle) */
+  needsDesignUrl: boolean;
+  /** Asks for a free-text description / content */
+  briefLabel?: string;
+  briefPlaceholder?: string;
+  designStart: DesignStart;
+  importStart: ImportStart;
+  /** Open "Generate from Brief" by default */
+  briefPanelOpen: boolean;
+}
+
+export const PRESETS: PresetDef[] = [
+  {
+    id: 'clone',
+    title: 'Clone a site',
+    desc: 'Rebuild a site as it is. Content and design both come from one URL.',
+    needsContentUrl: true,
+    needsDesignUrl: false,
+    designStart: 'page-url',
+    importStart: 'url',
+    briefPanelOpen: false,
+  },
+  {
+    id: 'restyle',
+    title: 'Change the design',
+    desc: "The client's content, with the look of another site or of your own design.md.",
+    needsContentUrl: true,
+    needsDesignUrl: true,
+    designStart: 'different-url',
+    importStart: 'url',
+    briefPanelOpen: false,
+  },
+  {
+    id: 'describe',
+    title: 'Describe it myself',
+    desc: 'You write what the page should be. The design comes from a URL.',
+    needsContentUrl: false,
+    needsDesignUrl: true,
+    briefLabel: 'Describe the page',
+    briefPlaceholder: 'Industry, audience, sections you want, tone, calls to action…',
+    designStart: 'different-url',
+    importStart: 'none',
+    briefPanelOpen: true,
+  },
+  {
+    id: 'content',
+    title: 'Bring my own content',
+    desc: 'You already have the structure and text written. Only the design comes from a URL.',
+    needsContentUrl: false,
+    needsDesignUrl: true,
+    briefLabel: 'Your page content',
+    briefPlaceholder: '# Hero title\nSubtitle…\n\n## Services\n- Service one: description\n- Service two: description\n\n## Contact\n…',
+    designStart: 'different-url',
+    importStart: 'paste',
+    briefPanelOpen: false,
+  },
+  {
+    id: 'manual',
+    title: 'Set up manually',
+    desc: 'All options visible, nothing pre-selected.',
+    needsContentUrl: false,
+    needsDesignUrl: false,
+    designStart: 'page-url',
+    importStart: 'url',
+    briefPanelOpen: false,
+  },
+];
+
+export function getPreset(id: string | null | undefined): PresetDef | null {
+  return PRESETS.find(p => p.id === id) ?? null;
+}
+
+/** Guide steps shown at the top of the editor */
+export type GuideStepId = 'design' | 'structure' | 'brief' | 'preview' | 'export';
+
+export interface GuideStep {
+  id: GuideStepId;
+  label: string;
+  hint: string;
+}
+
+export function guideSteps(p: PresetDef, hasDesignFile: boolean): GuideStep[] {
+  const design: GuideStep = {
+    id: 'design',
+    label: 'Design system',
+    hint: hasDesignFile
+      ? 'Your design.md is loaded. Review it in the Design tab.'
+      : p.designStart === 'page-url'
+        ? 'Design tab → "Page URL" → Extract Design System.'
+        : 'Design tab → "Other URL" (already filled in) → Extract Design System.',
+  };
+  const preview: GuideStep = { id: 'preview', label: 'Preview', hint: 'Preview tab → generate the HTML prototype and check it.' };
+  const exp: GuideStep = { id: 'export', label: 'Export', hint: 'Export tab → download the ZIP (blueprint, design.md, copy.md, images.md, fact-check).' };
+
+  switch (p.id) {
+    case 'clone':
+      return [
+        { id: 'structure', label: 'Import the page', hint: 'Import Structure → "Import This Page". Saves sections, copy.md and images.md.' },
+        design, preview, exp,
+      ];
+    case 'restyle':
+      return [
+        { id: 'structure', label: "Import the client's page", hint: 'Import Structure → "Import This Page" (the content site).' },
+        design, preview, exp,
+      ];
+    case 'describe':
+      return [
+        design,
+        { id: 'brief', label: 'Generate from your description', hint: 'Generate from Brief is open with your text and uses the project design.md.' },
+        exp,
+      ];
+    case 'content':
+      return [
+        { id: 'structure', label: 'Turn your content into sections', hint: 'Import Structure → "Paste my content" (already filled in) → "Build Sections".' },
+        design, preview, exp,
+      ];
+    default:
+      return [
+        { id: 'structure', label: 'Sections', hint: 'Import a page or add sections by hand.' },
+        design, preview, exp,
+      ];
+  }
+}
+
+/**
+ * Minimal Markdown → HTML for the "Paste my content" import. Only what people
+ * type by hand: headings, lists, quotes, paragraphs, links, bold/italic.
+ * The result goes through the same structure-import AI as a scraped page.
+ */
+export function contentToHtml(md: string): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s: string) =>
+    esc(s)
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img src="$2" alt="$1">')
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|\s)\*([^*]+)\*/g, '$1<em>$2</em>');
+
+  const out: string[] = [];
+  let list: 'ul' | 'ol' | null = null;
+  let para: string[] = [];
+  let sectionOpen = false;
+
+  const flushPara = () => {
+    if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`);
+    para = [];
+  };
+  const closeList = () => {
+    if (list) out.push(`</${list}>`);
+    list = null;
+  };
+
+  for (const raw of md.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = raw.trim();
+    if (!line) { flushPara(); closeList(); continue; }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      flushPara(); closeList();
+      const level = h[1].length;
+      // Every H1/H2 starts a new <section>, so the AI sees the intended blocks.
+      if (level <= 2) {
+        if (sectionOpen) out.push('</section>');
+        out.push('<section>');
+        sectionOpen = true;
+      }
+      out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+      continue;
+    }
+    const ul = line.match(/^[-*•]\s+(.*)$/);
+    const ol = line.match(/^\d+[.)]\s+(.*)$/);
+    if (ul || ol) {
+      flushPara();
+      const kind = ul ? 'ul' : 'ol';
+      if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
+      out.push(`<li>${inline((ul || ol)![1])}</li>`);
+      continue;
+    }
+    if (line.startsWith('>')) {
+      flushPara(); closeList();
+      out.push(`<blockquote>${inline(line.replace(/^>\s?/, ''))}</blockquote>`);
+      continue;
+    }
+    closeList();
+    para.push(line);
+  }
+  flushPara(); closeList();
+  if (sectionOpen) out.push('</section>');
+  return `<!DOCTYPE html><html><body><main>${out.join('\n')}</main></body></html>`;
+}
+
+/** copy.md for user-written content: the text is the copy, verbatim. */
+export function contentToCopyMd(md: string, pageName: string): string {
+  return `# Copy — ${pageName}\nTexto escrito por el cliente. Úsalo tal cual; no lo reescribas ni inventes datos.\n\n${md.trim()}\n\n<!-- END OF COPY -->\n`;
+}
