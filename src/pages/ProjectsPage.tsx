@@ -135,56 +135,70 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map(project => (
-              <div
-                key={project.id}
-                onClick={() => navigate(`/editor/${project.id}`)}
-                className="group relative bg-white border border-[#E5E7EB] p-5 cursor-pointer hover:border-[#2575FC] transition-all"
-              >
-                {project.screenshot_url ? (
-                  <div className="w-full h-32 overflow-hidden mb-4 bg-[#F9FAFB] border border-[#E5E7EB]">
-                    <img src={project.screenshot_url} alt={project.name} className="w-full h-full object-cover object-top opacity-80 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                ) : (
-                  <div className="w-full h-32 bg-[#F9FAFB] border border-[#E5E7EB] flex items-center justify-center mb-4">
-                    <Globe className="w-8 h-8 text-[#E5E7EB]" />
-                  </div>
-                )}
-
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-[#111827] font-medium text-sm truncate">{project.name}</h3>
-                    {project.url && (
-                      <p className="text-[#9CA3AF] text-xs mt-0.5 truncate flex items-center gap-1">
-                        <Globe className="w-3 h-3 shrink-0" />
-                        {project.url.replace(/^https?:\/\//, '')}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={e => handleDelete(e, project.id)}
-                    disabled={deletingId === project.id}
-                    className="opacity-0 group-hover:opacity-100 w-7 h-7 flex items-center justify-center text-[#9CA3AF] hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
-                  >
-                    {deletingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-[#E5E7EB]">
-                  <Clock className="w-3 h-3 text-[#9CA3AF]" />
-                  <span className="text-[#9CA3AF] text-xs">{formatDate(project.updated_at)}</span>
-                  {getPreset(project.preset) && project.preset !== 'manual' && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 bg-[#F9FAFB] border border-[#E5E7EB] text-[#6B7280] truncate">{getPreset(project.preset)!.title}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-start">
+            {projects.map(project => {
+              const domain = project.url ? project.url.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '') : '';
+              const preset = getPreset(project.preset);
+              return (
+                <div
+                  key={project.id}
+                  onClick={() => navigate(`/editor/${project.id}`)}
+                  className="group relative bg-white border border-[#E5E7EB] cursor-pointer hover:border-[#2575FC] transition-all flex flex-col"
+                >
+                  {project.screenshot_url ? (
+                    <div className="w-full aspect-[16/10] overflow-hidden bg-[#F9FAFB] border-b border-[#E5E7EB]">
+                      <img
+                        src={project.screenshot_url}
+                        alt={project.name}
+                        loading="lazy"
+                        className="w-full h-full object-cover object-top opacity-90 group-hover:opacity-100 transition-opacity"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full h-10 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center px-3 gap-2">
+                      <span className="w-5 h-5 flex items-center justify-center bg-white border border-[#E5E7EB] text-[10px] font-semibold text-[#9CA3AF] uppercase">
+                        {(domain || project.name).charAt(0)}
+                      </span>
+                      <span className="text-[10px] text-[#C4C9D4]">No preview yet — import a page</span>
+                    </div>
                   )}
-                  <ArrowRight className="w-3 h-3 text-[#2575FC] ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                  <div className="p-3 flex flex-col flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-[#111827] font-medium text-sm truncate" title={project.name}>{project.name}</h3>
+                        {domain && (
+                          <p className="text-[#9CA3AF] text-[11px] mt-0.5 truncate flex items-center gap-1">
+                            <Globe className="w-3 h-3 shrink-0" />
+                            {domain}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={e => handleDelete(e, project.id)}
+                        disabled={deletingId === project.id}
+                        title="Delete project"
+                        className="opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center justify-center text-[#9CA3AF] hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
+                      >
+                        {deletingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 mt-auto pt-2.5">
+                      <Clock className="w-3 h-3 text-[#9CA3AF] shrink-0" />
+                      <span className="text-[#9CA3AF] text-[11px] shrink-0">{formatDate(project.updated_at)}</span>
+                      {preset && preset.id !== 'manual' && (
+                        <span className="ml-1 text-[10px] px-1.5 py-0.5 bg-[#F9FAFB] border border-[#E5E7EB] text-[#6B7280] truncate">{preset.title}</span>
+                      )}
+                      <ArrowRight className="w-3 h-3 text-[#2575FC] ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
-
       {showNewModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowNewModal(false)}>
           <div className="bg-white border border-[#E5E7EB] p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
