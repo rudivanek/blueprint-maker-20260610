@@ -16,7 +16,8 @@ import type { Section } from '../types';
 const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'svg', 'canvas', 'iframe', 'template', 'link', 'meta', 'head', 'select', 'option']);
 const HEADINGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
 const SECTION_TAGS = new Set(['section', 'header', 'main', 'article', 'aside']);
-const SECTION_CLASS_RE = /\b(elementor-section|e-con|e-parent|et_pb_section|wp-block-group|wp-block-cover|brxe-section|section)\b/;
+// Page-builder section classes, matched as whole class tokens (not substrings like "elementor-section-wrap")
+const SECTION_CLASSES = new Set(['elementor-section', 'e-con', 'e-parent', 'et_pb_section', 'wp-block-group', 'wp-block-cover', 'brxe-section', 'section', 'fl-row', 'vc_row']);
 const NOISE_RE = /cookie|gdpr|consent|cmplz|cky-|popup|modal|offcanvas|screen-reader|sr-only|visually-hidden|skip-link|whatsapp|joinchat/i;
 
 function parse(html: string): Document {
@@ -42,20 +43,34 @@ function isSectionContainer(el: Element): boolean {
   const tag = el.tagName.toLowerCase();
   if (SECTION_TAGS.has(tag)) return true;
   // Page-builder top-level containers (only the outermost one counts, see sectionOf)
-  return SECTION_CLASS_RE.test(el.getAttribute('class') || '');
+  return (el.getAttribute('class') || '').split(/\s+/).some(c => SECTION_CLASSES.has(c));
 }
 
-/** Outermost section-like ancestor below <body>, so nested builder containers don't split a section. */
+function containerSiblings(el: Element): number {
+  const parent = el.parentElement;
+  if (!parent) return 0;
+  return Array.from(parent.children).filter(c => isSectionContainer(c)).length;
+}
+
+/**
+ * The page-level section an element belongs to: the outermost section-like ancestor that
+ * sits next to other sections. A lone wrapper around the whole page (common in page
+ * builders) is skipped, and nested containers don't split a section.
+ */
 function sectionOf(el: Element, body: Element): Element | null {
-  let found: Element | null = null;
+  const chain: Element[] = [];
   let node: Element | null = el.parentElement;
   while (node && node !== body) {
     const tag = node.tagName.toLowerCase();
-    if (tag === 'main') break;
-    if (isSectionContainer(node) && !['header', 'footer', 'nav'].includes(tag)) found = node;
+    if (['header', 'footer', 'nav'].includes(tag)) break;
+    if (tag !== 'main' && isSectionContainer(node)) chain.push(node);
     node = node.parentElement;
   }
-  return found;
+  if (!chain.length) return null;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    if (containerSiblings(chain[i]) >= 2) return chain[i];
+  }
+  return chain[0];
 }
 
 function sectionLabel(section: Element | null, fallbackIndex: number): string {
@@ -406,4 +421,3 @@ export function factCheckMd(pageName: string, findings: FabricationFinding[]): s
   );
   return lines.join('\n');
 }
-
