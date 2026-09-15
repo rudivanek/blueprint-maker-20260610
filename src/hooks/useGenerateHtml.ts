@@ -13,7 +13,7 @@
 import { useState, useRef } from 'react';
 import { generateBlueprintMd, getMasterPrompt, getScratchPrompt } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
-import { usageStore } from '../lib/usage';
+import { generateText, type Purpose } from '../lib/aiProxy';
 import type { GlobalSettings, Page, Section, AIProvider } from '../types';
 
 interface GenerateArgs {
@@ -92,182 +92,57 @@ Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explan
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic — streaming SSE
+// Provider call — Step 5: through ai-proxy, streamed, auto-continues when cut off
 // ---------------------------------------------------------------------------
 
-async function streamAnthropic(
-  apiKey: string,
+const htmlComplete = (t: string) => /<\/html>\s*(```)?\s*$/i.test(t.trim()) || t.toLowerCase().includes('</html>');
+
+async function runGeneration(
+  provider: AIProvider,
   systemPrompt: string,
   userText: string,
   screenshots: string[],
+  purpose: Purpose,
   onProgress: (chars: number) => void,
   signal: AbortSignal
-): Promise<{ text: string; truncated: boolean }> {
-  const content: unknown[] = [
-    ...screenshots
-      .map(uri => {
-        const parsed = dataUriParts(uri);
-        if (!parsed) return null;
-        return {
-          type: 'image',
-          source: { type: 'base64', media_type: parsed.mediaType, data: parsed.base64 },
-        };
-      })
-      .filter(Boolean),
-    { type: 'text', text: userText },
-  ];
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 64000,
-      stream: true,
-      system: systemPrompt,
-      messages: [{ role: 'user', content }],
-    }),
+): Promise<{ text: string; truncated: boolean; continues: number }> {
+  let content: unknown;
+  if (provider === 'openai') {
+    content = screenshots.length > 0
+      ? [...screenshots.map(uri => ({ type: 'image_url', image_url: { url: uri } })), { type: 'text', text: userText }]
+      : userText;
+  } else {
+    content = [
+      ...screenshots
+        .map(uri => {
+          const parsed = dataUriParts(uri);
+          return parsed ? { type: 'image', source: { type: 'base64', media_type: parsed.mediaType, data: parsed.base64 } } : null;
+        })
+        .filter(Boolean),
+      { type: 'text', text: userText },
+    ];
+  }
+  return generateText({
+    provider,
+    system: systemPrompt,
+    messages: [{ role: 'user', content }],
+    maxTokens: provider === 'openai' ? 32000 : 64000,
+    purpose,
     signal,
+    onText: onProgress,
+    isComplete: htmlComplete,
   });
-
-  if (!response.ok || !response.body) {
-    const errorBody = await response.json().catch(() => response.text());
-    const message = typeof errorBody === 'object' && errorBody !== null
-      ? (errorBody as { error?: { message?: string } }).error?.message ?? JSON.stringify(errorBody)
-      : String(errorBody);
-    throw new Error(`Anthropic API error: ${response.status} — ${message}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let text = '';
-  let stopReason = '';
-
-  // Live usage tracking: message_start carries input tokens; message_delta
-  // events carry CUMULATIVE output token counts as the stream progresses.
-  const callId = usageStore.startCall('claude-sonnet-4-6');
-  let sawUsage = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const evt = JSON.parse(payload);
-          if (evt.type === 'message_start' && evt.message?.usage) {
-            sawUsage = true;
-            usageStore.progressCall(callId, {
-              inputTokens: evt.message.usage.input_tokens ?? 0,
-              outputTokens: evt.message.usage.output_tokens ?? 0,
-            });
-          } else if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-            text += evt.delta.text;
-            onProgress(text.length);
-          } else if (evt.type === 'message_delta') {
-            if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
-            if (evt.usage?.output_tokens !== undefined) {
-              sawUsage = true;
-              usageStore.progressCall(callId, { outputTokens: evt.usage.output_tokens });
-            }
-          } else if (evt.type === 'error') {
-            throw new Error(evt.error?.message || 'Streaming error');
-          }
-        } catch (e) {
-          if (e instanceof SyntaxError) continue; // partial JSON line — skip
-          throw e;
-        }
-      }
-    }
-    if (sawUsage) usageStore.endCall(callId);
-    else usageStore.abortCall(callId);
-  } catch (e) {
-    // Keep whatever usage we observed before the failure
-    if (sawUsage) usageStore.endCall(callId);
-    else usageStore.abortCall(callId);
-    throw e;
-  }
-
-  return { text, truncated: stopReason === 'max_tokens' };
-}
-
-// ---------------------------------------------------------------------------
-// OpenAI — non-streaming
-// ---------------------------------------------------------------------------
-
-async function callOpenAIGenerate(
-  apiKey: string,
-  systemPrompt: string,
-  userText: string,
-  screenshots: string[],
-  signal: AbortSignal
-): Promise<{ text: string; truncated: boolean }> {
-  const userContent: unknown = screenshots.length > 0
-    ? [
-        ...screenshots.map(uri => ({ type: 'image_url', image_url: { url: uri } })),
-        { type: 'text', text: userText },
-      ]
-    : userText;
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-4.1',
-      max_tokens: 32000,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-    }),
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => response.text());
-    const message = typeof errorBody === 'object' && errorBody !== null
-      ? (errorBody as { error?: { message?: string } }).error?.message ?? JSON.stringify(errorBody)
-      : String(errorBody);
-    throw new Error(`OpenAI API error: ${response.status} — ${message}`);
-  }
-
-  const data = await response.json();
-  usageStore.report('gpt-4.1', data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0);
-  const choice = data.choices?.[0];
-  return {
-    text: choice?.message?.content ?? '',
-    truncated: choice?.finish_reason === 'length',
-  };
 }
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useGenerateHtml(provider: AIProvider, anthropicKey: string, openaiKey: string) {
+export function useGenerateHtml(provider: AIProvider) {
   const [generating, setGenerating] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  const activeKey = provider === 'openai' ? openaiKey : anthropicKey;
 
   const generate = async (args: GenerateArgs): Promise<{ html: string; truncated: boolean } | null> => {
     setGenerating(true);
@@ -286,9 +161,11 @@ export function useGenerateHtml(provider: AIProvider, anthropicKey: string, open
         setStatus(`Generating... ${(chars / 1000).toFixed(1)}K characters`);
       };
 
-      const result = provider === 'openai'
-        ? await callOpenAIGenerate(activeKey, systemPrompt, userText, screenshots, controller.signal)
-        : await streamAnthropic(activeKey, systemPrompt, userText, screenshots, onProgress, controller.signal);
+      const result = await runGeneration(
+        provider, systemPrompt, userText, screenshots,
+        args.previousHtml ? 'regenerate-html' : 'generate-html',
+        onProgress, controller.signal,
+      );
 
       const html = extractHtmlDocument(result.text);
       if (!html || html.length < 200) {
@@ -296,8 +173,10 @@ export function useGenerateHtml(provider: AIProvider, anthropicKey: string, open
       }
 
       setStatus(result.truncated
-        ? 'Generated, but output hit the token limit — the page may be cut off at the bottom.'
-        : 'Prototype generated.');
+        ? 'Generated, but the page may be cut off at the bottom (output limit reached even after continuing).'
+        : result.continues > 0
+          ? `Prototype generated (continued ${result.continues}× after a cut-off).`
+          : 'Prototype generated.');
       return { html, truncated: result.truncated };
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
@@ -342,9 +221,7 @@ Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explan
         setStatus(`Generating... ${(chars / 1000).toFixed(1)}K characters`);
       };
 
-      const result = provider === 'openai'
-        ? await callOpenAIGenerate(activeKey, systemPrompt, userText, [], controller.signal)
-        : await streamAnthropic(activeKey, systemPrompt, userText, [], onProgress, controller.signal);
+      const result = await runGeneration(provider, systemPrompt, userText, [], 'brief-html', onProgress, controller.signal);
 
       const html = extractHtmlDocument(result.text);
       if (!html || html.length < 200) {
@@ -352,7 +229,7 @@ Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explan
       }
 
       setStatus(result.truncated
-        ? 'Generated, but output hit the token limit — page may be cut off.'
+        ? 'Generated, but the page may be cut off (output limit reached even after continuing).'
         : 'Page generated successfully.');
 
       return { html, truncated: result.truncated };
