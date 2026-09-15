@@ -23,3 +23,4 @@ export function loadSettings(): AppSettings {
 export function saveSettings(settings: AppSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
+
