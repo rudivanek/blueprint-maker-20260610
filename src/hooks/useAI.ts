@@ -17,7 +17,7 @@
 import { useState } from 'react';
 import { DESIGN_SYSTEM_EXTRACTION_PROMPT, STRUCTURE_IMPORT_PROMPT } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
-import { anthropicCall, openaiCall, type Purpose } from '../lib/aiProxy';
+import { anthropicCall, openaiCall, salvageArray, type Purpose } from '../lib/aiProxy';
 import type { Section, GlobalSettings, AIProvider } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,7 @@ interface AIResult {
   text: string;
   toolInput: Record<string, unknown> | null;
   truncated: boolean;
+  rawToolJson?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ async function callAnthropic(
   }
   const result = await anthropicCall(body, { purpose: options.purpose });
   if (result.truncated) console.warn('Anthropic response is incomplete (max_tokens or cut off)');
-  return { text: result.text, toolInput: result.toolInput, truncated: result.truncated };
+  return { text: result.text, toolInput: result.toolInput, truncated: result.truncated, rawToolJson: result.rawToolJson };
 }
 
 // ---------------------------------------------------------------------------
@@ -613,9 +614,14 @@ ${provider === 'openai'
           // Fallback: tool block missing/incomplete (e.g. hard truncation) —
           // try the old text-JSON path before giving up.
           const parsed = parseStructureJson(result.text);
+          const salvaged = result.rawToolJson ? salvageArray(result.rawToolJson, 'sections') as Partial<Section>[] : [];
           if (parsed) {
             sections = parsed.sections;
             globals = parsed.globals;
+          } else if (wasTruncated && salvaged.length > 0) {
+            // Cut off mid-answer: keep the sections that arrived complete.
+            console.warn(`Structure import was cut off — kept ${salvaged.length} complete section(s).`);
+            sections = salvaged;
           } else if (wasTruncated) {
             // Signal the UI to offer compact-mode re-import
             return { sections: [], globals: {}, wasTruncated: true };
