@@ -141,13 +141,11 @@
     margin-bottom: 8px;
   }
 
-  /* Each section on its own page, first excepted */
-  .help-section { break-inside: avoid; }
-  .help-section + .help-section { break-before: page; }
-
-  /* Keep steps, tables, and tip boxes together */
+  /* Sections follow each other on the same page, never split */
+  .help-section { break-inside: avoid; margin-bottom: 18px; }
   .help-table { break-inside: avoid; }
   .help-body { break-inside: avoid; }
+  .help-body, .help-table td { color: #222 !important; }
 
   /* Show link URLs */
   a[href]::after {

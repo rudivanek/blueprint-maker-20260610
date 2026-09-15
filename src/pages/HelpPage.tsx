@@ -57,7 +57,7 @@ const tips = [
 
 export function HelpPage({ user, onSignOut }: HelpPageProps) {
   return (
-    <div className="min-h-screen bg-white flex flex-col" style={{ ['--app-version' as string]: APP_VERSION }}>
+    <div className="min-h-screen bg-white flex flex-col" style={{ ['--app-version' as string]: JSON.stringify(APP_VERSION) }}>
       <Header
         user={user}
         onSignOut={onSignOut}
