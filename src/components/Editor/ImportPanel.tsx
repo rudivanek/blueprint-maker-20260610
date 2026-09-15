@@ -73,12 +73,17 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       setShowCompact(true);
       toast('Response may be incomplete — use "Re-import (compact mode)" to capture all sections.', 'warning');
     } else {
-      setStructureStatus('success');
-      setCurrentStatus('Page structure imported.');
-      setShowCompact(false);
       ding();
       if (result.wasTruncated) {
-        toast('Response was truncated but sections were captured successfully.', 'warning');
+        // Some sections may be missing at the end — offer the shorter re-import.
+        setStructureStatus('truncated');
+        setCurrentStatus(`Imported ${result.sections.length} sections, but the answer was cut off — the last sections may be missing. Try "Re-import (compact mode)".`);
+        setShowCompact(true);
+        toast('The import was cut off. Check the last sections or re-import in compact mode.', 'warning');
+      } else {
+        setStructureStatus('success');
+        setCurrentStatus('Page structure imported.');
+        setShowCompact(false);
       }
     }
   };
@@ -300,12 +305,11 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       {(isLoading || currentStatus) && (
         <div className="flex items-center gap-2 bg-[#F9FAFB] border border-[#E5E7EB] px-3 py-2 mt-2">
           {isLoading && <Loader2 className="w-3.5 h-3.5 text-[#2575FC] animate-spin shrink-0" />}
-          <p className="text-[#9CA3AF] text-xs truncate">
-            {ai.status || firecrawl.status || currentStatus}
+          <p className="text-[#9CA3AF] text-xs break-words">
+            {isLoading ? (ai.status || firecrawl.status || currentStatus) : (currentStatus || ai.status)}
           </p>
         </div>
       )}
     </div>
   );
 }
-
