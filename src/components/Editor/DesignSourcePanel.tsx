@@ -30,12 +30,8 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
   const [cssSummary, setCssSummary] = useState<{ text: string; warning: string | null } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const firecrawl = useFirecrawl(appSettings.firecrawlApiKey);
-  const ai = useAI(
-    appSettings.aiProvider ?? 'anthropic',
-    appSettings.anthropicApiKey,
-    appSettings.openaiApiKey ?? ''
-  );
+  const firecrawl = useFirecrawl();
+  const ai = useAI(appSettings.aiProvider ?? 'anthropic');
 
   const activeAIKey = appSettings.aiProvider === 'openai' ? appSettings.openaiApiKey : appSettings.anthropicApiKey;
   const hasAPIKeys = !!(appSettings.firecrawlApiKey && activeAIKey);
@@ -324,4 +320,3 @@ function MissingAIKeyWarning({ provider }: { provider: string }) {
     </div>
   );
 }
-
