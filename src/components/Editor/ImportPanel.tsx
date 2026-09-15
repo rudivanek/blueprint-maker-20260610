@@ -10,6 +10,7 @@ import { ScanLine, Loader2, AlertCircle, CheckCircle, RefreshCw } from 'lucide-r
 import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
+import { buildCopyMd, buildImagesMd } from '../../lib/pageAssets';
 import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
 import type { GlobalSettings, Section, AppSettings } from '../../types';
@@ -18,7 +19,12 @@ interface ImportPanelProps {
   projectUrl: string;
   pageUrl: string;
   appSettings: AppSettings;
-  onStructureImported: (sections: Partial<Section>[], globals: Partial<GlobalSettings>, screenshotUrl?: string) => void;
+  onStructureImported: (
+    sections: Partial<Section>[],
+    globals: Partial<GlobalSettings>,
+    screenshotUrl?: string,
+    assets?: { copyMd: string; imagesMd: string },
+  ) => void;
   onPageUrlChange: (url: string) => void;
 }
 
@@ -32,6 +38,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
   const lastRawHtml = useRef<string | null>(null);
   const lastScreenshotSlices = useRef<string[]>([]);
   const lastScreenshotUrl = useRef<string | undefined>(undefined);
+  const lastAssets = useRef<{ copyMd: string; imagesMd: string } | undefined>(undefined);
   const [showCompact, setShowCompact] = useState(false);
 
   const firecrawl = useFirecrawl(appSettings.firecrawlApiKey);
@@ -45,7 +52,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     const result = await ai.importPageStructure(rawHtml, compactMode, screenshotSlices);
     if (!result) throw new Error(ai.error || 'AI failed to import structure');
 
-    onStructureImported(result.sections, result.globals, screenshotUrl);
+    onStructureImported(result.sections, result.globals, screenshotUrl, lastAssets.current);
 
     if (result.wasTruncated && result.sections.length === 0) {
       setStructureStatus('truncated');
@@ -80,6 +87,17 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       const screenshotSlices = await prepareScreenshotForAI(crawlResult.screenshot);
       if (screenshotSlices.length === 0 && crawlResult.screenshot) {
         toast('Screenshot could not be prepared — importing from HTML only.', 'warning');
+      }
+
+      // Verbatim copy + real image URLs, captured without AI (saved with the page, exported in the ZIP)
+      try {
+        lastAssets.current = {
+          copyMd: buildCopyMd(crawlResult.rawHtml, url, crawlResult.markdown),
+          imagesMd: buildImagesMd(crawlResult.rawHtml, url),
+        };
+      } catch (err) {
+        console.warn('Could not build copy.md / images.md:', err);
+        lastAssets.current = undefined;
       }
 
       let htmlToProcess = crawlResult.rawHtml;
@@ -207,3 +225,4 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     </div>
   );
 }
+
