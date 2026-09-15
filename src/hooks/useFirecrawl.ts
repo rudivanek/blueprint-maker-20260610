@@ -6,6 +6,7 @@
 //   (rendered colors, real fonts) instead of CSS text alone.
 
 import { useState } from 'react';
+import { firecrawlScrape } from '../lib/aiProxy';
 
 interface FirecrawlResponse {
   success: boolean;
@@ -18,7 +19,8 @@ interface FirecrawlResponse {
   };
 }
 
-export function useFirecrawl(apiKey: string) {
+// Step 5: scrapes go through the ai-proxy edge function (key stays on the server).
+export function useFirecrawl() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -30,37 +32,26 @@ export function useFirecrawl(apiKey: string) {
 
     try {
       setStatus('Crawling site for design data...');
-      const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          url,
-          formats: ['extract', 'rawHtml', 'screenshot@fullPage'],
-          waitFor: 2000,
-          extract: {
-            schema: {
-              type: 'object',
-              properties: {
-                brand_name: { type: 'string' },
-                colors: { type: 'object', description: 'All brand colors found on the site' },
-                fonts: { type: 'array', items: { type: 'string' }, description: 'Font families used' },
-                logo_url: { type: 'string' },
-                primary_color: { type: 'string' },
-                accent_color: { type: 'string' },
-                background_color: { type: 'string' },
-                text_color: { type: 'string' },
-              },
+      const data = await firecrawlScrape<FirecrawlResponse>({
+        url,
+        formats: ['extract', 'rawHtml', 'screenshot@fullPage'],
+        waitFor: 2000,
+        extract: {
+          schema: {
+            type: 'object',
+            properties: {
+              brand_name: { type: 'string' },
+              colors: { type: 'object', description: 'All brand colors found on the site' },
+              fonts: { type: 'array', items: { type: 'string' }, description: 'Font families used' },
+              logo_url: { type: 'string' },
+              primary_color: { type: 'string' },
+              accent_color: { type: 'string' },
+              background_color: { type: 'string' },
+              text_color: { type: 'string' },
             },
           },
-        }),
-      });
-
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Firecrawl error: ${response.status} — ${err}`);
-      }
-
-      const data: FirecrawlResponse = await response.json();
+        },
+      }, 'scrape-design');
       setStatus('Design data received.');
 
       return {
@@ -82,22 +73,11 @@ export function useFirecrawl(apiKey: string) {
     setStatus('Fetching HTML and screenshot...');
 
     try {
-      const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          url,
-          formats: ['rawHtml', 'markdown', 'screenshot@fullPage'],
-          onlyMainContent: false,
-        }),
-      });
-
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Firecrawl error: ${response.status} — ${err}`);
-      }
-
-      const data: FirecrawlResponse = await response.json();
+      const data = await firecrawlScrape<FirecrawlResponse>({
+        url,
+        formats: ['rawHtml', 'markdown', 'screenshot@fullPage'],
+        onlyMainContent: false,
+      }, 'scrape-structure');
       setStatus('Page data received.');
 
       return {
