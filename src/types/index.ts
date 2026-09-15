@@ -349,3 +349,4 @@ export const SECTION_TEMPLATES: Record<string, Partial<Section>> = {
     ],
   },
 };
+
