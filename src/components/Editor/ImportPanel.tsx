@@ -53,16 +53,16 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
   const lastAssets = useRef<{ copyMd: string; imagesMd: string } | undefined>(undefined);
   const [showCompact, setShowCompact] = useState(false);
 
-  const firecrawl = useFirecrawl(appSettings.firecrawlApiKey);
-  const ai = useAI(appSettings.aiProvider ?? 'anthropic', appSettings.anthropicApiKey, appSettings.openaiApiKey ?? '');
+  const firecrawl = useFirecrawl();
+  const ai = useAI(appSettings.aiProvider ?? 'anthropic');
 
   const activeAIKey = appSettings.aiProvider === 'openai' ? appSettings.openaiApiKey : appSettings.anthropicApiKey;
   const hasKeys = !!(appSettings.firecrawlApiKey && activeAIKey);
   const providerLabel = appSettings.aiProvider === 'openai' ? 'OpenAI (GPT-4.1)' : 'Anthropic (Claude)';
   const hasAIKey = !!activeAIKey;
 
-  const runImport = async (rawHtml: string, compactMode: boolean, screenshotSlices: string[], screenshotUrl?: string) => {
-    const result = await ai.importPageStructure(rawHtml, compactMode, screenshotSlices);
+  const runImport = async (rawHtml: string, compactMode: boolean, screenshotSlices: string[], screenshotUrl?: string, fromContent = false) => {
+    const result = await ai.importPageStructure(rawHtml, compactMode, screenshotSlices, fromContent ? 'content-import' : 'structure-import');
     if (!result) throw new Error(ai.error || 'AI failed to import structure');
 
     onStructureImported(result.sections, result.globals, screenshotUrl, lastAssets.current);
@@ -148,7 +148,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       lastScreenshotSlices.current = [];
       lastScreenshotUrl.current = undefined;
       setCurrentStatus(`Analyzing your content with ${providerLabel}...`);
-      await runImport(html, false, []);
+      await runImport(html, false, [], undefined, true);
     } catch (e) {
       setStructureStatus('error');
       setCurrentStatus(e instanceof Error ? e.message : 'Unknown error');
@@ -236,7 +236,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
         <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 px-3 py-2.5 mb-3">
           <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
           <p className="text-amber-700 text-xs">
-            Add your Firecrawl and {appSettings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} API keys in Settings.
+            No Firecrawl or {appSettings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} key on the server yet. Add them in Settings.
           </p>
         </div>
       )}
@@ -269,7 +269,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
           {!hasAIKey && (
             <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 px-3 py-2.5 mb-3">
               <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-amber-700 text-xs">Add your {appSettings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} API key in Settings.</p>
+              <p className="text-amber-700 text-xs">No {appSettings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} key on the server yet. Add it in Settings.</p>
             </div>
           )}
           <button
@@ -308,4 +308,3 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     </div>
   );
 }
-
