@@ -10,7 +10,8 @@ import type { AppSettings } from '../../types';
 interface DesignSourcePanelProps {
   projectUrl: string;
   appSettings: AppSettings;
-  onDesignGenerated: (designMd: string) => void;
+  /** meta: the scraped screenshot + which URL it came from (used for the project thumbnail) */
+  onDesignGenerated: (designMd: string, meta?: { screenshot?: string; sourceUrl?: string }) => void;
   /** Step 4: preset decides the starting mode */
   initialMode?: SourceMode;
   /** Step 4: reference URL chosen in the New Project wizard */
@@ -87,7 +88,7 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
         if (marked > 0) inferredNote = ` ${marked} colour row${marked === 1 ? '' : 's'} not found in the CSS marked (inferred).`;
       }
 
-      onDesignGenerated(finalMd);
+      onDesignGenerated(finalMd, { screenshot: crawlResult.screenshot, sourceUrl: url });
       setStatus('success');
       setStatusMsg(`Design system extracted.${inferredNote}`);
       ding();
