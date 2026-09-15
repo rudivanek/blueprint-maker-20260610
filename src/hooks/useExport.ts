@@ -143,3 +143,4 @@ ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual referenc
 
   return { exportZip, downloadFile, copyToClipboard, exporting };
 }
+
