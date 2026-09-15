@@ -129,3 +129,4 @@ export function SettingsPage({ user, onSignOut }: SettingsPageProps) {
     </div>
   );
 }
+
