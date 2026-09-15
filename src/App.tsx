@@ -1,16 +1,28 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AuthPage } from './pages/AuthPage';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { EditorPage } from './pages/EditorPage';
-import { SettingsPage } from './pages/SettingsPage';
+import { lazy, Suspense } from 'react';
 import { ToastContainer, useToast } from './components/ui/Toast';
 import { Header } from './components/Layout/Header';
 import { Loader2 } from 'lucide-react';
 
+// Pages load on demand: the editor (and its AI/export code) is only
+// downloaded when a project is opened.
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const EditorPage = lazy(() => import('./pages/EditorPage').then(m => ({ default: m.EditorPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+
+function PageLoader() {
+  return (
+    <div className="flex-1 min-h-[50vh] flex items-center justify-center">
+      <Loader2 className="w-6 h-6 text-[#9CA3AF] animate-spin" />
+    </div>
+  );
+}
+
 function AppShell() {
   const { user, loading, signOut } = useAuth();
-  const { toasts, addToast, removeToast } = useToast();
+  const { toasts, removeToast } = useToast();
 
   if (loading) {
     return (
@@ -33,6 +45,7 @@ function AppShell() {
 
   return (
     <>
+      <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route
           path="/"
@@ -47,6 +60,7 @@ function AppShell() {
         <Route path="/settings" element={<SettingsPage user={user} onSignOut={signOut} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
       <ToastContainer toasts={toasts} onRemove={removeToast} />
     </>
   );
