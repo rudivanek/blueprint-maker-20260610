@@ -139,7 +139,15 @@ export function EditorPage({ user }: EditorPageProps) {
     await reorderPages(reordered);
   };
 
-  const handleStructureImported = async (importedSections: Partial<Section>[], importedGlobals: Partial<GlobalSettings>, screenshot?: string) => {
+  const handleStructureImported = async (
+    importedSections: Partial<Section>[],
+    importedGlobals: Partial<GlobalSettings>,
+    screenshot?: string,
+    assets?: { copyMd: string; imagesMd: string },
+  ) => {
+    if (assets && activePageId) {
+      await updatePage(activePageId, { copy_md: assets.copyMd, images_md: assets.imagesMd });
+    }
     if (project && importedGlobals && Object.keys(importedGlobals).length > 0) {
       await updateGlobals({ ...project.globals, ...importedGlobals });
     }
