@@ -40,17 +40,6 @@ function extractSectionList(sections: string): string {
   return sections.split('\n').filter(l => l.trim()).map(l => `- ${l.trim()}`).join('\n');
 }
 
-function colorBlock(designMd: string): string {
-  const colors = extractColors(designMd);
-  if (!colors) return '';
-  return `\nBrand colors: ${colors}`;
-}
-
-function fontBlock(designMd: string): string {
-  const fonts = extractFonts(designMd);
-  return `\nTypography: ${fonts}`;
-}
-
 // ─── platform formatters ────────────────────────────────────────────────────
 
 function lovablePrompt({ brief, designMd, sections }: VibePromptArgs): string {
