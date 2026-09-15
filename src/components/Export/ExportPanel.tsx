@@ -1,166 +1,225 @@
-import { useState } from 'react';
-import { Download, Copy, FileText, Archive, Loader2, Check, Image } from 'lucide-react';
-import type { Project, Page, Section } from '../../types';
-import { useExport } from '../../hooks/useExport';
-import { generateBlueprintMd, getMasterPrompt } from '../../lib/prompts';
-import { ding } from '../../lib/ding';
+// src/components/Editor/ImportPanel.tsx
+//
+// CHANGE IN THIS VERSION:
+// - The Firecrawl full-page screenshot is now sliced (lib/screenshot.ts) and
+//   sent to the AI alongside the HTML, for both the normal import path and the
+//   WordPress/Elementor path. Compact-mode re-import reuses the same slices.
 
-interface ExportPanelProps {
-  project: Project;
-  pages: Page[];
-  allSections: Record<string, Section[]>;
-  activePage: Page | null;
-  activeSections: Section[];
-  screenshotMap: Record<string, string>;
+import { useState, useRef } from 'react';
+import { ScanLine, Loader2, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { useFirecrawl } from '../../hooks/useFirecrawl';
+import { useAI } from '../../hooks/useAI';
+import { prepareScreenshotForAI } from '../../lib/screenshot';
+import { buildCopyMd, buildImagesMd } from '../../lib/pageAssets';
+import { toast } from '../ui/Toast';
+import { ding } from '../../lib/ding';
+import type { GlobalSettings, Section, AppSettings } from '../../types';
+
+interface ImportPanelProps {
+  projectUrl: string;
+  pageUrl: string;
+  appSettings: AppSettings;
+  onStructureImported: (
+    sections: Partial<Section>[],
+    globals: Partial<GlobalSettings>,
+    screenshotUrl?: string,
+    assets?: { copyMd: string; imagesMd: string },
+  ) => void;
+  onPageUrlChange: (url: string) => void;
 }
 
-export function ExportPanel({ project, pages, allSections, activePage, activeSections, screenshotMap }: ExportPanelProps) {
-  const [copied, setCopied] = useState<string | null>(null);
-  const [includeScreenshots, setIncludeScreenshots] = useState(false);
-  const { exportZip, downloadFile, copyToClipboard, exporting } = useExport();
+type ImportStatus = 'idle' | 'loading' | 'success' | 'error' | 'truncated';
 
-  const pagesWithScreenshots = pages.filter(p => screenshotMap[p.id]);
-  const hasAnyScreenshot = pagesWithScreenshots.length > 0;
+export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImported, onPageUrlChange }: ImportPanelProps) {
+  const [url, setUrl] = useState(pageUrl || projectUrl || '');
+  const [isWordPress, setIsWordPress] = useState(false);
+  const [structureStatus, setStructureStatus] = useState<ImportStatus>('idle');
+  const [currentStatus, setCurrentStatus] = useState('');
+  const lastRawHtml = useRef<string | null>(null);
+  const lastScreenshotSlices = useRef<string[]>([]);
+  const lastScreenshotUrl = useRef<string | undefined>(undefined);
+  const lastAssets = useRef<{ copyMd: string; imagesMd: string } | undefined>(undefined);
+  const [showCompact, setShowCompact] = useState(false);
 
-  const handleCopy = async (content: string, id: string) => {
-    const ok = await copyToClipboard(content);
-    if (ok) { setCopied(id); setTimeout(() => setCopied(null), 2000); }
+  const firecrawl = useFirecrawl(appSettings.firecrawlApiKey);
+  const ai = useAI(appSettings.aiProvider ?? 'anthropic', appSettings.anthropicApiKey, appSettings.openaiApiKey ?? '');
+
+  const activeAIKey = appSettings.aiProvider === 'openai' ? appSettings.openaiApiKey : appSettings.anthropicApiKey;
+  const hasKeys = !!(appSettings.firecrawlApiKey && activeAIKey);
+  const providerLabel = appSettings.aiProvider === 'openai' ? 'OpenAI (GPT-4.1)' : 'Anthropic (Claude)';
+
+  const runImport = async (rawHtml: string, compactMode: boolean, screenshotSlices: string[], screenshotUrl?: string) => {
+    const result = await ai.importPageStructure(rawHtml, compactMode, screenshotSlices);
+    if (!result) throw new Error(ai.error || 'AI failed to import structure');
+
+    onStructureImported(result.sections, result.globals, screenshotUrl, lastAssets.current);
+
+    if (result.wasTruncated && result.sections.length === 0) {
+      setStructureStatus('truncated');
+      setCurrentStatus('Import failed — no sections parsed.');
+      setShowCompact(true);
+      toast('Response may be incomplete — use "Re-import (compact mode)" to capture all sections.', 'warning');
+    } else {
+      setStructureStatus('success');
+      setCurrentStatus('Page structure imported.');
+      setShowCompact(false);
+      ding();
+      if (result.wasTruncated) {
+        toast('Response was truncated but sections were captured successfully.', 'warning');
+      }
+    }
   };
 
-  const handleExportZip = async () => {
-    await exportZip(project, pages, allSections, screenshotMap, includeScreenshots);
-    ding();
+  const handleStructureImport = async () => {
+    if (!url || !hasKeys) return;
+    setStructureStatus('loading');
+    setShowCompact(false);
+    setCurrentStatus('Crawling site for page structure...');
+    onPageUrlChange(url);
+
+    try {
+      setCurrentStatus('Fetching HTML and screenshot...');
+      const crawlResult = await firecrawl.scrapeForStructure(url);
+      if (!crawlResult) throw new Error(firecrawl.error || 'Firecrawl failed');
+
+      // Prepare screenshot slices for the AI (best effort — empty array on failure)
+      setCurrentStatus('Preparing screenshot for visual analysis...');
+      const screenshotSlices = await prepareScreenshotForAI(crawlResult.screenshot);
+      if (screenshotSlices.length === 0 && crawlResult.screenshot) {
+        toast('Screenshot could not be prepared — importing from HTML only.', 'warning');
+      }
+
+      // Verbatim copy + real image URLs, captured without AI (saved with the page, exported in the ZIP)
+      try {
+        lastAssets.current = {
+          copyMd: buildCopyMd(crawlResult.rawHtml, url, crawlResult.markdown),
+          imagesMd: buildImagesMd(crawlResult.rawHtml, url),
+        };
+      } catch (err) {
+        console.warn('Could not build copy.md / images.md:', err);
+        lastAssets.current = undefined;
+      }
+
+      let htmlToProcess = crawlResult.rawHtml;
+
+      if (isWordPress) {
+        // For Elementor/WP sites rawHtml is mostly empty JS wrappers.
+        // Use markdown (rendered DOM) + rawHtml (for image/video/link URLs) combined.
+        setCurrentStatus('Extracting WordPress/Elementor content...');
+        const extracted = await ai.extractWordPressContent(crawlResult.rawHtml, crawlResult.markdown, screenshotSlices);
+        if (!extracted) throw new Error(ai.error || 'Failed to extract WordPress content');
+        htmlToProcess = extracted;
+      }
+
+      lastRawHtml.current = htmlToProcess;
+      lastScreenshotSlices.current = screenshotSlices;
+      lastScreenshotUrl.current = crawlResult.screenshot;
+
+      setCurrentStatus(`Analyzing page structure with ${providerLabel}...`);
+      await runImport(htmlToProcess, false, screenshotSlices, crawlResult.screenshot);
+    } catch (e) {
+      setStructureStatus('error');
+      setCurrentStatus(e instanceof Error ? e.message : 'Unknown error');
+    }
   };
 
-  const handleDownloadDesign = () => {
-    if (!project.design_md) return;
-    downloadFile(project.design_md, 'design.md', 'text/markdown');
+  const handleCompactReimport = async () => {
+    if (!lastRawHtml.current) return;
+    setStructureStatus('loading');
+    setCurrentStatus('Re-importing in compact mode...');
+
+    try {
+      await runImport(lastRawHtml.current, true, lastScreenshotSlices.current, lastScreenshotUrl.current);
+    } catch (e) {
+      setStructureStatus('error');
+      setCurrentStatus(e instanceof Error ? e.message : 'Unknown error');
+    }
   };
 
-  const handleDownloadBlueprint = () => {
-    if (!activePage) return;
-    const md = generateBlueprintMd(project.globals, activePage, activeSections);
-    const filename = pages.length > 1 ? `blueprint-${activePage.slug || activePage.page_name.toLowerCase().replace(/\s+/g, '-')}.md` : 'blueprint.md';
-    downloadFile(md, filename, 'text/markdown');
-  };
-
-  const blueprintPreview = activePage ? generateBlueprintMd(project.globals, activePage, activeSections) : '';
-  const promptPreview = getMasterPrompt(includeScreenshots && hasAnyScreenshot);
+  const isLoading = structureStatus === 'loading' || firecrawl.loading || ai.loading;
 
   return (
-    <div className="h-full overflow-auto px-4 py-5 space-y-4">
-      <div>
-        <button
-          onClick={handleExportZip}
-          disabled={exporting}
-          className="w-full flex items-center justify-center gap-2.5 bg-[#2575FC] hover:bg-[#1a5fe0] disabled:opacity-50 text-white font-semibold text-sm py-3 rounded-none transition-all"
-        >
-          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
-          Export Package (.zip)
-        </button>
+    <div className="bg-white border border-[#E5E7EB] p-4 mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[#111827] font-medium text-sm">Import Structure</h3>
+        <span className="text-[10px] px-2 py-0.5 bg-[#F9FAFB] border border-[#E5E7EB] text-[#9CA3AF] font-medium">
+          {providerLabel}
+        </span>
+      </div>
 
-        <label className="flex items-center gap-2.5 mt-3 px-1 cursor-pointer select-none">
-          <div
-            onClick={() => setIncludeScreenshots(v => !v)}
-            className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 shrink-0 ${includeScreenshots ? 'bg-[#2575FC]' : 'bg-[#E5E7EB]'}`}
-          >
-            <div className={`w-3 h-3 rounded-full bg-white shadow transition-transform ${includeScreenshots ? 'translate-x-4' : 'translate-x-0'}`} />
-          </div>
-          <div>
-            <span className="text-[#111827] text-xs font-medium">Include screenshots</span>
-            {hasAnyScreenshot ? (
-              <span className="block text-[10px] text-[#9CA3AF]">
-                {pagesWithScreenshots.length} page{pagesWithScreenshots.length !== 1 ? 's' : ''} with screenshots
-              </span>
-            ) : (
-              <span className="block text-[10px] text-[#9CA3AF]">No screenshots captured yet</span>
-            )}
-          </div>
+      <div className="mb-3">
+        <input
+          type="url"
+          value={url}
+          onChange={e => setUrl(e.target.value)}
+          placeholder={projectUrl || 'https://example.com/page'}
+          disabled={isLoading}
+          className="w-full bg-white border border-[#E5E7EB] rounded-none px-3 py-2.5 text-sm text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all disabled:opacity-50"
+        />
+        {projectUrl && url !== projectUrl && (
+          <p className="text-[10px] text-[#9CA3AF] mt-1">
+            Using page-specific URL (project default: {projectUrl})
+          </p>
+        )}
+      </div>
+
+      <div className="mb-3">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isWordPress}
+            onChange={e => setIsWordPress(e.target.checked)}
+            disabled={isLoading}
+            className="w-3.5 h-3.5 accent-[#2575FC]"
+          />
+          <span className="text-xs text-[#9CA3AF]">WordPress site — clean HTML before import</span>
         </label>
-
-        <p className="text-[#9CA3AF] text-[10px] text-center mt-2">
-          prompt.txt + design.md + blueprint.md{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
-        </p>
+        {isWordPress && (
+          <p className="text-[10px] text-amber-500 mt-1.5 leading-relaxed">
+            ⚠ For Elementor-based sites, leaving this unchecked may produce better results — Elementor renders content via JS which limits what the cleaner can extract.
+          </p>
+        )}
       </div>
 
-      <div className="flex gap-2">
-        <button
-          onClick={handleDownloadDesign}
-          disabled={!project.design_md}
-          className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-[#F9FAFB] border border-[#E5E7EB] hover:border-[#2575FC] disabled:opacity-40 text-[#111827] text-xs font-medium py-2.5 rounded-none transition-all"
-        >
-          <Download className="w-3.5 h-3.5" /> design.md
-        </button>
-        <button
-          onClick={handleDownloadBlueprint}
-          disabled={!activePage}
-          className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-[#F9FAFB] border border-[#E5E7EB] hover:border-[#2575FC] disabled:opacity-40 text-[#111827] text-xs font-medium py-2.5 rounded-none transition-all"
-        >
-          <Download className="w-3.5 h-3.5" /> blueprint.md
-        </button>
-      </div>
-
-      {hasAnyScreenshot && (
-        <div className="bg-white border border-[#E5E7EB] overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-[#E5E7EB]">
-            <Image className="w-3.5 h-3.5 text-[#9CA3AF]" />
-            <span className="text-[#111827] text-xs font-medium">Screenshots</span>
-            <span className="ml-auto text-[10px] bg-[#F9FAFB] border border-[#E5E7EB] text-[#9CA3AF] px-2 py-0.5">
-              {pagesWithScreenshots.length} captured
-            </span>
-          </div>
-          <div className="p-2 space-y-1.5">
-            {pagesWithScreenshots.map(page => {
-              const data = screenshotMap[page.id];
-              const src = data.startsWith('data:') || data.startsWith('http') ? data : `data:image/jpeg;base64,${data}`;
-              return (
-                <div key={page.id} className="flex items-center gap-2">
-                  <img src={src} alt={page.page_name} className="w-12 h-8 object-cover object-top shrink-0 border border-[#E5E7EB]" />
-                  <span className="text-[#111827] text-xs truncate">{page.page_name}</span>
-                </div>
-              );
-            })}
-          </div>
+      {!hasKeys && (
+        <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 px-3 py-2.5 mb-3">
+          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-amber-700 text-xs">
+            Add your Firecrawl and {appSettings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} API keys in Settings.
+          </p>
         </div>
       )}
 
-      <div className="bg-white border border-[#E5E7EB] overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
-          <div className="flex items-center gap-2">
-            <FileText className="w-3.5 h-3.5 text-[#9CA3AF]" />
-            <span className="text-[#111827] text-xs font-medium">Master Prompt</span>
-          </div>
-          <button
-            onClick={() => handleCopy(promptPreview, 'prompt')}
-            className="flex items-center gap-1.5 text-xs text-[#9CA3AF] hover:text-[#2575FC] transition-colors"
-          >
-            {copied === 'prompt' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
-            {copied === 'prompt' ? 'Copied!' : 'Copy'}
-          </button>
-        </div>
-        <div className="px-4 py-3 max-h-40 overflow-auto">
-          <pre className="text-[#9CA3AF] text-[11px] font-mono leading-relaxed whitespace-pre-wrap">{promptPreview.slice(0, 300)}...</pre>
-        </div>
-      </div>
+      <button
+        onClick={handleStructureImport}
+        disabled={!url || !hasKeys || isLoading}
+        className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#F9FAFB] hover:bg-white border border-[#E5E7EB] hover:border-[#2575FC] rounded-none text-sm text-[#111827] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {structureStatus === 'loading' ? <Loader2 className="w-4 h-4 text-[#2575FC] animate-spin" /> :
+         structureStatus === 'success' ? <CheckCircle className="w-4 h-4 text-green-600" /> :
+         structureStatus === 'truncated' ? <AlertCircle className="w-4 h-4 text-yellow-600" /> :
+         structureStatus === 'error' ? <AlertCircle className="w-4 h-4 text-red-600" /> :
+         <ScanLine className="w-4 h-4 text-[#9CA3AF]" />}
+        Import This Page
+      </button>
 
-      {blueprintPreview && (
-        <div className="bg-white border border-[#E5E7EB] overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
-            <div className="flex items-center gap-2">
-              <FileText className="w-3.5 h-3.5 text-[#9CA3AF]" />
-              <span className="text-[#111827] text-xs font-medium">blueprint.md preview</span>
-            </div>
-            <button
-              onClick={() => handleCopy(blueprintPreview, 'blueprint')}
-              className="flex items-center gap-1.5 text-xs text-[#9CA3AF] hover:text-[#2575FC] transition-colors"
-            >
-              {copied === 'blueprint' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
-              {copied === 'blueprint' ? 'Copied!' : 'Copy'}
-            </button>
-          </div>
-          <div className="px-4 py-3 max-h-60 overflow-auto">
-            <pre className="text-[#9CA3AF] text-[11px] font-mono leading-relaxed whitespace-pre-wrap">{blueprintPreview.slice(0, 800)}{blueprintPreview.length > 800 ? '\n...' : ''}</pre>
-          </div>
+      {showCompact && lastRawHtml.current && (
+        <button
+          onClick={handleCompactReimport}
+          disabled={isLoading}
+          className="w-full flex items-center justify-center gap-2 py-2.5 mt-2 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-none text-sm text-amber-700 font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Re-import (compact mode)
+        </button>
+      )}
+
+      {(isLoading || currentStatus) && (
+        <div className="flex items-center gap-2 bg-[#F9FAFB] border border-[#E5E7EB] px-3 py-2 mt-2">
+          {isLoading && <Loader2 className="w-3.5 h-3.5 text-[#2575FC] animate-spin shrink-0" />}
+          <p className="text-[#9CA3AF] text-xs truncate">
+            {ai.status || firecrawl.status || currentStatus}
+          </p>
         </div>
       )}
     </div>
