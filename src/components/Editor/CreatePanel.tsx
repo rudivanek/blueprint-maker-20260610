@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Wand2, Upload, X, Download, Copy, Loader2, AlertCircle, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { AIProvider } from '../../types';
-import { getScratchPrompt } from '../../lib/prompts';
+import { useGenerateHtml } from '../../hooks/useGenerateHtml';
 import { VibeExportPanel } from './VibeExportPanel';
 
 interface CreatePanelProps {
@@ -22,30 +22,22 @@ const EXAMPLE_BRIEFS = [
   'Homepage for a boutique law firm specializing in corporate M&A. Dark navy and gold, hero with appointment CTA, practice areas grid, attorney profiles, contact form.',
 ];
 
-function extractHtml(raw: string): string {
-  const lower = raw.toLowerCase();
-  const start = lower.indexOf('<!doctype html');
-  if (start !== -1) return raw.slice(start);
-  const h = lower.indexOf('<html');
-  if (h !== -1) return raw.slice(h);
-  return raw.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
-}
-
 export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false, initialBrief = '', projectDesignMd = '', defaultOpen = false }: CreatePanelProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [brief, setBrief] = useState(initialBrief);
   const [uploadedDesignMd, setDesignMd] = useState('');
   const [designMdName, setDesignMdName] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState('');
+  const gen = useGenerateHtml(provider);
+  const generating = gen.generating;
+  const status = gen.error ? '' : gen.status;
+  const [localError, setError] = useState('');
+  const error = localError || gen.error || '';
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // An uploaded file wins; otherwise the project's own design.md is used.
   const designMd = uploadedDesignMd || projectDesignMd;
   const usingProjectDesign = !uploadedDesignMd && !!projectDesignMd;
-  const abortRef = useRef<AbortController | null>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -60,96 +52,18 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false,
   const handleGenerate = async () => {
     if (!brief.trim()) return;
     const activeKey = provider === 'anthropic' ? anthropicKey : openaiKey;
-    if (!activeKey) { setError('No API key set for ' + provider); return; }
-
-    setGenerating(true);
+    if (!activeKey) { setError(`No ${provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} key on the server. Add it in Settings.`); return; }
     setError('');
-    setStatus('Starting generation...');
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    const systemPrompt = getScratchPrompt();
-    const userText = `Build a complete standalone HTML page based on this creative brief and design system.\n\n=== CREATIVE BRIEF ===\n${brief.trim()}\n\n=== design.md ===\n${designMd || '(no design.md — infer a clean modern design system from the brief)'}\n\nReturn ONLY the complete HTML document, starting with <!DOCTYPE html>. No explanations before or after.`;
-
-    try {
-      if (provider === 'anthropic') {
-        // Streaming
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'anthropic-dangerous-direct-browser-access': 'true',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 64000,
-            stream: true,
-            system: systemPrompt,
-            messages: [{ role: 'user', content: userText }],
-          }),
-          signal: controller.signal,
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error((err as any)?.error?.message ?? `HTTP ${resp.status}`);
-        }
-        const reader = resp.body!.getReader();
-        const dec = new TextDecoder();
-        let accumulated = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = dec.decode(value);
-          for (const line of chunk.split('\n')) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
-            try {
-              const evt = JSON.parse(data);
-              if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-                accumulated += evt.delta.text;
-                setStatus(`Generating... ${(accumulated.length / 1000).toFixed(1)}K characters`);
-              }
-            } catch {}
-          }
-        }
-        const html = extractHtml(accumulated);
-        if (html.length < 200) throw new Error('Model returned no usable HTML — try again.');
-        setGeneratedHtml(html);
-        setStatus('Page generated successfully.');
-      } else {
-        // OpenAI non-streaming
-        setStatus('Generating with OpenAI...');
-        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeKey}` },
-          body: JSON.stringify({
-            model: 'gpt-4.1',
-            max_tokens: 32000,
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-          }),
-          signal: controller.signal,
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error((err as any)?.error?.message ?? `HTTP ${resp.status}`);
-        }
-        const data = await resp.json();
-        const html = extractHtml(data.choices?.[0]?.message?.content ?? '');
-        if (html.length < 200) throw new Error('Model returned no usable HTML — try again.');
-        setGeneratedHtml(html);
-        setStatus('Page generated successfully.');
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError') { setStatus('Cancelled.'); }
-      else { setError(err.message ?? 'Unknown error'); setStatus(''); }
-    } finally {
-      setGenerating(false);
-      abortRef.current = null;
-    }
+    // Step 5: same generator as the Preview tab — goes through ai-proxy,
+    // streams, and continues automatically if the page is cut off.
+    const result = await gen.generateFromScratch({
+      designMd: designMd || '(no design.md — infer a clean modern design system from the brief)',
+      brief: brief.trim(),
+    });
+    if (result) setGeneratedHtml(result.html);
   };
 
-  const cancel = () => { abortRef.current?.abort(); };
+  const cancel = () => { gen.cancel(); };
 
   const handleDownload = () => {
     const blob = new Blob([generatedHtml], { type: 'text/html' });
@@ -238,7 +152,7 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false,
 
           {(status || error) && (
             <div className={`flex items-start gap-2 px-3 py-2 rounded text-[11px] ${error ? 'bg-red-50 text-red-700' : 'bg-indigo-50 text-indigo-700'}`}>
-              {error ? <AlertCircle size={11} className="mt-0.5 shrink-0" /> : <Loader2 size={11} className="mt-0.5 shrink-0 animate-spin" />}
+              {error ? <AlertCircle size={11} className="mt-0.5 shrink-0" /> : generating ? <Loader2 size={11} className="mt-0.5 shrink-0 animate-spin" /> : <CheckCircle size={11} className="mt-0.5 shrink-0" />}
               <span>{error || status}</span>
             </div>
           )}
@@ -279,4 +193,3 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, inline = false,
     </div>
   );
 }
-
