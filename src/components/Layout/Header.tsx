@@ -29,7 +29,7 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
         <div className="w-7 h-7 border-2 border-[#2575FC] flex items-center justify-center">
           <span className="text-[#2575FC] text-xs font-bold tracking-tight">S</span>
         </div>
-        <span className="text-[#111827] font-semibold text-sm tracking-tight hidden sm:block">Sharpen.Studio</span>
+        <span className="text-[#111827] font-semibold text-sm tracking-tight hidden sm:block">Sharpen.Studio<span className="ml-2 text-[10px] text-[#C4C9D4] font-medium">{APP_VERSION}</span></span>
       </Link>
 
       {breadcrumbs && breadcrumbs.length > 0 && (
@@ -50,7 +50,6 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
 
       <div className="ml-auto flex items-center gap-2">
         {rightSlot}
-        <span className="text-[10px] text-[#C4C9D4] font-medium select-none">{APP_VERSION}</span>
         <button
           onClick={() => setShowHelp(true)}
           className="w-8 h-8 flex items-center justify-center text-[#9CA3AF] hover:text-[#2575FC] hover:bg-[#F9FAFB] transition-colors"
