@@ -259,3 +259,4 @@ export const VIBE_TARGETS: { id: VibeTarget; label: string; url: string; color: 
   { id: 'v0',       label: 'v0',       url: 'https://v0.dev',       color: '#000000', description: 'shadcn/ui components' },
   { id: 'generic',  label: 'Any',      url: '',                     color: '#6B7280', description: 'Works with any AI builder' },
 ];
+
