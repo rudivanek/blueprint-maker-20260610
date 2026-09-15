@@ -157,6 +157,12 @@ export interface Page {
   sort_order: number;
   custom_instructions: string;
   page_url: string;
+  /** In-app generated HTML prototype (see PreviewPanel) */
+  generated_html?: string;
+  /** Verbatim page text captured at import (no AI) */
+  copy_md?: string;
+  /** Real image URLs captured at import (no AI) */
+  images_md?: string;
   created_at: string;
   updated_at: string;
   sections?: Section[];
