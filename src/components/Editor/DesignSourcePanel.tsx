@@ -4,7 +4,7 @@ import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { ding } from '../../lib/ding';
-import { fetchDesignTokens, summarizeTokens } from '../../lib/designTokens';
+import { fetchDesignTokens, summarizeTokens, annotateInferredColors } from '../../lib/designTokens';
 import type { AppSettings } from '../../types';
 
 interface DesignSourcePanelProps {
@@ -78,9 +78,18 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated }
       );
       if (!designMd) throw new Error(ai.error || 'AI failed to generate design system');
 
-      onDesignGenerated(designMd);
+      // Safety net: mark every colour the stylesheets don't contain as "(inferred)".
+      let finalMd = designMd;
+      let inferredNote = '';
+      if (tokens.data) {
+        const { text, marked } = annotateInferredColors(designMd, tokens.data);
+        finalMd = text;
+        if (marked > 0) inferredNote = ` ${marked} colour row${marked === 1 ? '' : 's'} not found in the CSS marked (inferred).`;
+      }
+
+      onDesignGenerated(finalMd);
       setStatus('success');
-      setStatusMsg('Design system extracted.');
+      setStatusMsg(`Design system extracted.${inferredNote}`);
       ding();
     } catch (e) {
       setStatus('error');
@@ -270,7 +279,7 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated }
             {isLoading && <Loader2 className="w-3 h-3 text-[#2575FC] animate-spin shrink-0" />}
             {status === 'success' && !isLoading && <CheckCircle className="w-3 h-3 text-green-600 shrink-0" />}
             {status === 'error' && !isLoading && <AlertCircle className="w-3 h-3 text-red-600 shrink-0" />}
-            <p className={`text-[11px] truncate ${status === 'error' ? 'text-red-600' : status === 'success' ? 'text-green-600' : 'text-[#9CA3AF]'}`}>
+            <p className={`text-[11px] break-words ${status === 'error' ? 'text-red-600' : status === 'success' ? 'text-green-600' : 'text-[#9CA3AF]'}`}>
               {status === 'loading' ? (statusMsg || ai.status || firecrawl.status) : statusMsg}
             </p>
           </div>

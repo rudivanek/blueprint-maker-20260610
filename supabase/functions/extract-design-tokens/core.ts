@@ -248,8 +248,8 @@ export function findStylesheetLinks(html: string, base: string): string[] {
   return [...new Set(out)];
 }
 
-export function findInlineStyles(html: string): string[] {
-  return [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map(m => m[1]);
+export function findInlineStyles(html: string): { id: string; css: string }[] {
+  return [...html.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)].map(m => ({ id: attr(`<style ${m[1]}>`, 'id') ?? '', css: m[2] }));
 }
 
 export function parseGoogleFontsUrl(url: string): string[] {
@@ -464,6 +464,15 @@ const STATE_RE = /:(hover|focus|focus-visible|focus-within|active|visited)\b/i;
 // evidence (e.g. UIkit, Select2 or WordPress core defaults would otherwise pollute the palette).
 // Elementor's generated brand CSS lives in /wp-content/uploads/elementor/, so it is NOT vendor.
 const VENDOR_SHEET_RE = /\/wp-content\/plugins\/|\/wp-includes\/|bootstrap(\.min)?\.css|normalize\.css|reset\.css|font-?awesome|swiper|slick|animate(\.min)?\.css|dashicons|wp-block-library|woocommerce-(layout|smallscreen)|jquery-ui|uikit|select2|owl\.carousel|magnific|lightbox|fancybox|aos(\.min)?\.css|glightbox|splide|flickity/i;
+// WordPress prints plugin CSS inline as <style id="{handle}-inline-css">; these handles are defaults.
+const VENDOR_INLINE_ID_RE = /fluent|wp-block|global-styles|classic-theme|core-block|woocommerce|contact-form|wpcf7|wpforms|gform|uikit|select2|font-?awesome|dashicons|admin-bar|jetpack|cookie|cky-|cmplz|wpml|trp-|popup|joinchat/i;
+// Rules whose every selector starts with a plugin/library prefix (catches plugin CSS merged into
+// one optimised blob). Elementor-generated brand rules start with .elementor-…, so they are kept.
+const VENDOR_SELECTOR_RE = /^\s*(\.|#)(ff-|ff_|fluentform|frm-fluent|el-|uk-|select2|wpcf7|wpforms|gform|gfield|woocommerce|wc-block|swiper|slick-|mfp-|fancybox|lg-|pswp|fa-|dashicons|elementor-lightbox|dialog-|cky-|cmplz|cookie|moove|wpml|trp-|pum-|joinchat|qlwapp|grecaptcha|iti)/i;
+export function isVendorSelector(selector: string): boolean {
+  const parts = selector.split(',').map(s => s.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every(s => VENDOR_SELECTOR_RE.test(s));
+}
 // Platform utility selectors that carry default palettes, not brand choices.
 const PLATFORM_CHROME_RE = /^\.w-(form|input|webflow-badge|file-upload)|^\.wp-block-(?!button)|^\.elementor-widget-container|^#wpadminbar|\.screen-reader-text|\.has-[\w-]+-(color|background-color|gradient-background|border-color)\b|^:root\s+:where\(/;
 const DARK_RE = /prefers-color-scheme\s*:\s*dark/i;
@@ -533,8 +542,8 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
   // 2. Collect CSS sources
   type Source = { label: string; css: string; vendor: boolean };
   const sources: Source[] = [];
-  findInlineStyles(html).forEach((css, idx) => {
-    sources.push({ label: `inline-${idx + 1}`, css, vendor: false });
+  findInlineStyles(html).forEach(({ id, css }, idx) => {
+    sources.push({ label: `inline-${idx + 1}`, css, vendor: VENDOR_INLINE_ID_RE.test(id) });
     sheets.push({ url: `inline-${idx + 1}`, bytes: css.length, inline: true });
     totalCssBytes += css.length;
   });
@@ -602,9 +611,11 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
   for (const p of parsed) {
     for (const rule of p.rules) {
       if (rule.context.some(c => /^@media/i.test(c))) continue;
+      // plugin/library variables still resolve var(), but are not listed as brand tokens
+      const vendorRule = p.vendor || isVendorSelector(rule.selector);
       for (const [prop, val] of rule.decls) {
         if (!prop.startsWith('--')) continue;
-        allCp.push({ name: prop, value: val, selector: rule.selector, prio: cpPriority(rule.selector) });
+        allCp.push({ name: prop, value: val, selector: rule.selector, prio: vendorRule ? 9 : cpPriority(rule.selector) });
       }
     }
   }
@@ -614,7 +625,7 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
     const key = `${cp.selector}::${cp.name}`;
     if (cpSeen.has(key)) continue;
     cpSeen.add(key);
-    if (cp.name.startsWith('--wp--preset--') || cp.name.startsWith('--tw-')) continue;
+    if (cp.prio === 9 || cp.name.startsWith('--wp--preset--') || cp.name.startsWith('--tw-')) continue;
     cpList.push({ name: cp.name, value: cp.value, selector: cp.selector });
   }
 
@@ -659,7 +670,7 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
     for (const rule of p.rules) {
       const sel = rule.selector;
       for (const t of sel.matchAll(/[.#]([\w-]+)/g)) selectorTokens.add(t[1]);
-      if (p.vendor || PLATFORM_CHROME_RE.test(sel)) continue;
+      if (p.vendor || PLATFORM_CHROME_RE.test(sel) || isVendorSelector(sel)) continue;
 
       const mediaCtx = rule.context.find(c => /^@media/i.test(c));
       for (const bp of (mediaCtx ?? '').matchAll(/(min|max)-width\s*:\s*([\d.]+(px|em|rem))/gi)) bps.add(`${bp[1]}-width: ${bp[2]}`, sel);

@@ -13,6 +13,10 @@ export interface FreqEntry { value: string; count: number; samples: string[] }
 export interface DesignTokenResult {
   pageUrl: string;
   colors: FreqEntry[];
+  stateColors?: FreqEntry[];
+  darkModeColors?: FreqEntry[];
+  roles?: { role: string; colors: FreqEntry[]; backgrounds: FreqEntry[] }[];
+  customProperties?: { name: string; value: string; resolved: string; selector: string }[];
   fonts: {
     googleFamilies: string[];
     googleFontsUrls: string[];
@@ -86,4 +90,46 @@ export function summarizeTokens(t: DesignTokenResult): string {
   ])];
   const fonts = families.length ? `fonts: ${families.slice(0, 4).join(', ')}` : 'no web fonts found';
   return `${platform} · ${t.diagnostics.sheetsFetchedOk}/${t.diagnostics.linkedSheetsFound} stylesheets · ${t.colors.length} colours · ${fonts}`;
+}
+
+function expandHex(h: string): string {
+  const v = h.toLowerCase();
+  if (v.length === 4) return '#' + v[1] + v[1] + v[2] + v[2] + v[3] + v[3];
+  return v.slice(0, 7); // ignore alpha channel for matching
+}
+
+/** Every hex colour that was actually measured in the site's (non-plugin) CSS. */
+export function measuredHexes(t: DesignTokenResult): Set<string> {
+  const values: string[] = [
+    ...t.colors, ...(t.stateColors ?? []), ...(t.darkModeColors ?? []),
+    ...(t.roles ?? []).flatMap(r => [...r.colors, ...r.backgrounds]),
+  ].map(e => e.value);
+  values.push(...(t.customProperties ?? []).map(c => c.resolved));
+  const set = new Set<string>();
+  for (const v of values) for (const m of v.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []) set.add(expandHex(m));
+  return set;
+}
+
+/**
+ * Safety net for design.md: in every Markdown table row that contains a hex
+ * colour the CSS evidence does not contain, append "(inferred)" to the last
+ * cell (unless the row already says so). Returns the new text and the count.
+ */
+export function annotateInferredColors(designMd: string, t: DesignTokenResult): { text: string; marked: number } {
+  const measured = measuredHexes(t);
+  let marked = 0;
+  const text = designMd.split('\n').map(line => {
+    if (!line.trim().startsWith('|') || /inferred/i.test(line) || /^\s*\|[\s:|-]+\|\s*$/.test(line)) return line;
+    const hexes = line.match(/#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b/g);
+    if (!hexes) return line;
+    if (hexes.every(h => measured.has(expandHex(h)))) return line;
+    const cells = line.split('|');
+    // cells: ['', c1, c2, ..., cN, ''] — append to the last non-empty cell
+    for (let i = cells.length - 1; i >= 0; i--) {
+      if (cells[i].trim()) { cells[i] = cells[i].replace(/\s*$/, ' (inferred) '); break; }
+    }
+    marked++;
+    return cells.join('|');
+  }).join('\n');
+  return { text, marked };
 }
