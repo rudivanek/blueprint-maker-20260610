@@ -75,6 +75,7 @@ export interface TokenResult {
     sheetsFetchedOk: number;
     sheetsFailed: SheetFailure[];
     sheets: SheetInfo[];
+    vendorSheets: number;       // plugin/library sheets excluded from colour & type evidence
     totalCssBytes: number;
     cssLooksInsufficient: boolean;
     insufficientReasons: string[];
@@ -88,7 +89,7 @@ export const LIMITS = {
   htmlBytes: 3_000_000,
   sheetBytes: 1_500_000,
   totalCssBytes: 6_000_000,
-  maxSheets: 30,
+  maxSheets: 40,
   pageTimeoutMs: 12_000,
   sheetTimeoutMs: 10_000,
   maxRedirects: 3,
@@ -459,8 +460,12 @@ const ROLE_TESTS: [string, RegExp][] = [
 ];
 
 const STATE_RE = /:(hover|focus|focus-visible|focus-within|active|visited)\b/i;
-const VENDOR_SHEET_RE = /bootstrap(\.min)?\.css|normalize\.css|reset\.css|font-?awesome|swiper|slick|animate(\.min)?\.css|dashicons|wp-block-library|woocommerce-(layout|smallscreen)|jquery-ui/i;
-const PLATFORM_CHROME_RE = /^\.w-(form|input|webflow-badge|file-upload)|^\.wp-block-(?!button)|^\.elementor-widget-container|^#wpadminbar|\.screen-reader-text/;
+// Library / plugin CSS: parsed for @font-face and custom properties only, never counted as brand
+// evidence (e.g. UIkit, Select2 or WordPress core defaults would otherwise pollute the palette).
+// Elementor's generated brand CSS lives in /wp-content/uploads/elementor/, so it is NOT vendor.
+const VENDOR_SHEET_RE = /\/wp-content\/plugins\/|\/wp-includes\/|bootstrap(\.min)?\.css|normalize\.css|reset\.css|font-?awesome|swiper|slick|animate(\.min)?\.css|dashicons|wp-block-library|woocommerce-(layout|smallscreen)|jquery-ui|uikit|select2|owl\.carousel|magnific|lightbox|fancybox|aos(\.min)?\.css|glightbox|splide|flickity/i;
+// Platform utility selectors that carry default palettes, not brand choices.
+const PLATFORM_CHROME_RE = /^\.w-(form|input|webflow-badge|file-upload)|^\.wp-block-(?!button)|^\.elementor-widget-container|^#wpadminbar|\.screen-reader-text|\.has-[\w-]+-(color|background-color|gradient-background|border-color)\b|^:root\s+:where\(/;
 const DARK_RE = /prefers-color-scheme\s*:\s*dark/i;
 
 function familyClean(v: string): string {
@@ -537,12 +542,16 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
   // Font-service CSS (Google/Bunny/Adobe) is reported under Fonts, not parsed as site CSS.
   const FONT_SERVICE_RE = /fonts\.googleapis\.com|fonts\.bunny\.net|use\.typekit\.net/i;
   const linked = findStylesheetLinks(html, pageUrl).filter(u => !FONT_SERVICE_RE.test(u));
-  const queue: { url: string; depth: number }[] = linked.map(url => ({ url, depth: 0 }));
+  // Theme / builder sheets first, so the sheet cap never drops brand CSS in favour of plugin CSS.
+  const ordered = [...linked].sort((a, b) => Number(VENDOR_SHEET_RE.test(a)) - Number(VENDOR_SHEET_RE.test(b)));
+  const queue: { url: string; depth: number }[] = ordered.map(url => ({ url, depth: 0 }));
+  let skippedByCap = 0;
   const seen = new Set<string>();
   let fetchedOk = 0;
 
   const fetchSheet = async (url: string, depth: number) => {
-    if (seen.has(url) || seen.size >= LIMITS.maxSheets) return;
+    if (seen.has(url)) return;
+    if (seen.size >= LIMITS.maxSheets) { skippedByCap++; return; }
     seen.add(url);
     if (totalCssBytes >= LIMITS.totalCssBytes) { sheetsFailed.push({ url, reason: 'total-css-cap-reached' }); return; }
     const r = await safeFetchText(url, {
@@ -745,6 +754,8 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
     if (ratio < 0.05) insufficientReasons.push(`only ${Math.round(ratio * 100)}% of the page's classes appear in the fetched CSS`);
   }
   if (linked.length > 0 && fetchedOk === 0) insufficientReasons.push('none of the linked stylesheets could be downloaded');
+  if (skippedByCap > 0) sheetsFailed.push({ url: `(${skippedByCap} more stylesheets)`, reason: `skipped: limit of ${LIMITS.maxSheets} sheets` });
+  const vendorSheets = sources.filter(s => s.vendor).length;
 
   const platform = detectPlatform(html, parsed.map(p => p.css).join('\n').slice(0, 2_000_000), linked);
 
@@ -779,6 +790,7 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
       sheetsFetchedOk: fetchedOk,
       sheetsFailed,
       sheets,
+      vendorSheets,
       totalCssBytes,
       cssLooksInsufficient: insufficientReasons.length > 0,
       insufficientReasons,
@@ -804,6 +816,7 @@ export function buildDigest(r: TokenResult): string {
   L.push(`Source: ${r.pageUrl}`);
   L.push(`Platform: cms=${r.platform.cms ?? 'unknown'}, builder=${r.platform.builder ?? 'none'}, framework=${r.platform.framework ?? 'none'}, css=${r.platform.cssApproach}`);
   L.push(`Stylesheets: ${d.sheetsFetchedOk}/${d.linkedSheetsFound} linked sheets downloaded, ${d.sheets.filter(s => s.inline).length} inline blocks, ${Math.round(d.totalCssBytes / 1024)} KB total.`);
+  if (d.vendorSheets) L.push(`${d.vendorSheets} plugin/library stylesheets were ignored for colours and type (their defaults are not the brand).`);
   if (d.cssLooksInsufficient) L.push(`⚠ CSS LOOKS INCOMPLETE: ${d.insufficientReasons.join('; ')}. Rely more on the screenshot and mark guessed values as (inferred).`);
   L.push('Counts (×N) = number of CSS rules using the value. Higher count = more likely a real brand token.');
   L.push('');
