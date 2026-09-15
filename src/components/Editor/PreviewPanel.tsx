@@ -48,11 +48,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const [copied, setCopied] = useState(false);
   const [localStatus, setLocalStatus] = useState('');
 
-  const gen = useGenerateHtml(
-    appSettings.aiProvider ?? 'anthropic',
-    appSettings.anthropicApiKey,
-    appSettings.openaiApiKey ?? ''
-  );
+  const gen = useGenerateHtml(appSettings.aiProvider ?? 'anthropic');
 
   const activeAIKey = appSettings.aiProvider === 'openai' ? appSettings.openaiApiKey : appSettings.anthropicApiKey;
   const hasKey = !!activeAIKey;
