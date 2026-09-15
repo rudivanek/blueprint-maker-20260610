@@ -1,2 +1,5 @@
 [functions.extract-design-tokens]
 verify_jwt = true
+
+[functions.ai-proxy]
+verify_jwt = true
