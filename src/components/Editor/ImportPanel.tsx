@@ -9,7 +9,7 @@
 //   sent to the AI alongside the HTML, for both the normal import path and the
 //   WordPress/Elementor path. Compact-mode re-import reuses the same slices.
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ScanLine, Loader2, AlertCircle, CheckCircle, RefreshCw, Globe, FileText } from 'lucide-react';
 import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
@@ -18,6 +18,7 @@ import { buildCopyMd, buildImagesMd } from '../../lib/pageAssets';
 import { contentToHtml, contentToCopyMd } from '../../lib/presets';
 import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
+import { jobStore } from '../../lib/jobStore';
 import type { GlobalSettings, Section, AppSettings } from '../../types';
 
 interface ImportPanelProps {
@@ -61,8 +62,35 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
   const providerLabel = appSettings.aiProvider === 'openai' ? 'OpenAI (GPT-4.1)' : 'Anthropic (Claude)';
   const hasAIKey = !!activeAIKey;
 
+  // Blocking overlay (lib/jobStore): one job at a time, live status, Cancel.
+  const jobRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobRef.current !== null) jobStore.update(jobRef.current, ai.status || firecrawl.status || currentStatus);
+  }, [ai.status, firecrawl.status, currentStatus]);
+
+  const withJob = async (title: string, estimate: string, fn: () => Promise<void>) => {
+    const id = jobStore.start({ kind: 'import', title, estimate });
+    if (id === null) return;
+    jobRef.current = id;
+    try {
+      await fn();
+    } finally {
+      jobStore.finish(id);
+      jobRef.current = null;
+    }
+  };
+
+  /** true (and resets the panel) when the user pressed Cancel in the overlay */
+  const stopIfCancelled = () => {
+    if (!jobStore.isCancelled(jobRef.current)) return false;
+    setStructureStatus('idle');
+    setCurrentStatus('Cancelled — nothing was changed.');
+    return true;
+  };
+
   const runImport = async (rawHtml: string, compactMode: boolean, screenshotSlices: string[], screenshotUrl?: string, fromContent = false) => {
     const result = await ai.importPageStructure(rawHtml, compactMode, screenshotSlices, fromContent ? 'content-import' : 'structure-import');
+    if (stopIfCancelled()) return;
     if (!result) throw new Error(ai.error || 'AI failed to import structure');
 
     onStructureImported(result.sections, result.globals, screenshotUrl, lastAssets.current);
@@ -88,7 +116,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     }
   };
 
-  const handleStructureImport = async () => {
+  const handleStructureImport = () => withJob('Importing the page…', 'Usually 1–3 minutes', async () => {
     if (!url || !hasKeys) return;
     setStructureStatus('loading');
     setShowCompact(false);
@@ -98,6 +126,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     try {
       setCurrentStatus('Fetching HTML and screenshot...');
       const crawlResult = await firecrawl.scrapeForStructure(url);
+      if (stopIfCancelled()) return; // cancelled after the scrape: skip the AI call
       if (!crawlResult) throw new Error(firecrawl.error || 'Firecrawl failed');
 
       // Prepare screenshot slices for the AI (best effort — empty array on failure)
@@ -136,12 +165,13 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       setCurrentStatus(`Analyzing page structure with ${providerLabel}...`);
       await runImport(htmlToProcess, false, screenshotSlices, crawlResult.screenshot);
     } catch (e) {
+      if (stopIfCancelled()) return;
       setStructureStatus('error');
       setCurrentStatus(e instanceof Error ? e.message : 'Unknown error');
     }
-  };
+  });
 
-  const handleContentImport = async () => {
+  const handleContentImport = () => withJob('Building sections from your text…', 'Usually about 30 seconds', async () => {
     if (content.trim().length < 20 || !hasAIKey) return;
     setStructureStatus('loading');
     setShowCompact(false);
@@ -155,12 +185,13 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       setCurrentStatus(`Analyzing your content with ${providerLabel}...`);
       await runImport(html, false, [], undefined, true);
     } catch (e) {
+      if (stopIfCancelled()) return;
       setStructureStatus('error');
       setCurrentStatus(e instanceof Error ? e.message : 'Unknown error');
     }
-  };
+  });
 
-  const handleCompactReimport = async () => {
+  const handleCompactReimport = () => withJob('Re-importing in compact mode…', 'Usually 1–2 minutes', async () => {
     if (!lastRawHtml.current) return;
     setStructureStatus('loading');
     setCurrentStatus('Re-importing in compact mode...');
@@ -168,10 +199,11 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     try {
       await runImport(lastRawHtml.current, true, lastScreenshotSlices.current, lastScreenshotUrl.current);
     } catch (e) {
+      if (stopIfCancelled()) return;
       setStructureStatus('error');
       setCurrentStatus(e instanceof Error ? e.message : 'Unknown error');
     }
-  };
+  });
 
   const isLoading = structureStatus === 'loading' || firecrawl.loading || ai.loading;
 

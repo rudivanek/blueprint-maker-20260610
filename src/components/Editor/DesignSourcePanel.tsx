@@ -1,10 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, ExternalLink, Upload, Code, Loader2, AlertCircle, CheckCircle, Ruler } from 'lucide-react';
 import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { ding } from '../../lib/ding';
 import { fetchDesignTokens, summarizeTokens, annotateInferredColors, fontWarnings } from '../../lib/designTokens';
+import { jobStore } from '../../lib/jobStore';
 import type { AppSettings } from '../../types';
 
 interface DesignSourcePanelProps {
@@ -39,13 +40,40 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
   const hasAIKey = !!activeAIKey;
   const providerLabel = appSettings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic';
 
-  const extractFromUrl = async (url: string) => {
+  // Blocking overlay (lib/jobStore): one job at a time, live status, Cancel.
+  const jobRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobRef.current !== null) jobStore.update(jobRef.current, ai.status || firecrawl.status || statusMsg);
+  }, [ai.status, firecrawl.status, statusMsg]);
+
+  const withJob = async (fn: () => Promise<void>) => {
+    const id = jobStore.start({ kind: 'design', title: 'Creating the design system…', estimate: 'Usually 1–2 minutes' });
+    if (id === null) return;
+    jobRef.current = id;
+    try {
+      await fn();
+    } finally {
+      jobStore.finish(id);
+      jobRef.current = null;
+    }
+  };
+
+  /** true (and resets the panel) when the user pressed Cancel in the overlay */
+  const stopIfCancelled = () => {
+    if (!jobStore.isCancelled(jobRef.current)) return false;
+    setStatus('idle');
+    setStatusMsg('Cancelled — design.md was not changed.');
+    return true;
+  };
+
+  const extractFromUrl = (url: string) => withJob(async () => {
     if (!url || !hasAPIKeys) return;
     setStatus('loading');
     setStatusMsg('Fetching site with Firecrawl...');
 
     try {
       const crawlResult = await firecrawl.scrapeForDesign(url);
+      if (stopIfCancelled()) return; // cancelled after the scrape: skip the AI call
       if (!crawlResult) throw new Error(firecrawl.error || 'Firecrawl failed');
 
       // In parallel: screenshot slices (visual ground truth) and measured CSS
@@ -77,6 +105,7 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
         screenshotSlices,
         tokens.data?.digest,
       );
+      if (stopIfCancelled()) return;
       if (!designMd) throw new Error(ai.error || 'AI failed to generate design system');
 
       // Safety net: mark every colour the stylesheets don't contain as "(inferred)".
@@ -93,23 +122,25 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
       setStatusMsg(`Design system extracted.${inferredNote}`);
       ding();
     } catch (e) {
+      if (stopIfCancelled()) return;
       setStatus('error');
       setStatusMsg(e instanceof Error ? e.message : 'Unknown error');
     }
-  };
+  });
 
   const handleExtract = () => {
     if (mode === 'page-url') extractFromUrl(projectUrl);
     else if (mode === 'different-url') extractFromUrl(differentUrl);
   };
 
-  const handleExtractFromHtml = async () => {
+  const handleExtractFromHtml = () => withJob(async () => {
     if (!pastedHtml.trim() || !hasAIKey) return;
     setStatus('loading');
     setStatusMsg(`Analyzing design system with ${providerLabel}...`);
 
     try {
       const designMd = await ai.generateDesignSystem({}, pastedHtml);
+      if (stopIfCancelled()) return;
       if (!designMd) throw new Error(ai.error || 'AI failed to generate design system');
 
       onDesignGenerated(designMd);
@@ -117,10 +148,11 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
       setStatusMsg('Design system extracted.');
       ding();
     } catch (e) {
+      if (stopIfCancelled()) return;
       setStatus('error');
       setStatusMsg(e instanceof Error ? e.message : 'Unknown error');
     }
-  };
+  });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

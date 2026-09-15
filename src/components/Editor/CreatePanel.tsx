@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Wand2, Upload, X, Download, Copy, Loader2, AlertCircle, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { AIProvider } from '../../types';
 import { useGenerateHtml } from '../../hooks/useGenerateHtml';
+import { jobStore } from '../../lib/jobStore';
 import { VibeExportPanel } from './VibeExportPanel';
 
 interface CreatePanelProps {
@@ -55,14 +56,28 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, initialBrief = 
     const activeKey = provider === 'anthropic' ? anthropicKey : openaiKey;
     if (!activeKey) { setError(`No ${provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} key on the server. Add it in Settings.`); return; }
     setError('');
-    // Step 5: same generator as the Preview tab — goes through ai-proxy,
-    // streams, and continues automatically if the page is cut off.
-    const result = await gen.generateFromScratch({
-      designMd: designMd || '(no design.md — infer a clean modern design system from the brief)',
-      brief: brief.trim(),
-    });
-    if (result) setGeneratedHtml(result.html);
+    const jobId = jobStore.start({ kind: 'brief', title: 'Generating the page from your brief…', estimate: 'Usually 2–4 minutes', cancel: gen.cancel });
+    if (jobId === null) return;
+    jobRef.current = jobId;
+    try {
+      // Same generator as the Preview tab — goes through ai-proxy,
+      // streams, and continues automatically if the page is cut off.
+      const result = await gen.generateFromScratch({
+        designMd: designMd || '(no design.md — infer a clean modern design system from the brief)',
+        brief: brief.trim(),
+      });
+      if (result && !jobStore.isCancelled(jobId)) setGeneratedHtml(result.html);
+    } finally {
+      jobStore.finish(jobId);
+      jobRef.current = null;
+    }
   };
+
+  // Blocking overlay (lib/jobStore): live status in the overlay.
+  const jobRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobRef.current !== null) jobStore.update(jobRef.current, gen.status);
+  }, [gen.status]);
 
   const cancel = () => { gen.cancel(); };
 

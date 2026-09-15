@@ -157,3 +157,9 @@
   /* Use full width */
   .max-w-\[820px\] { max-width: 100% !important; }
 }
+
+/* Processing overlay: indeterminate progress bar */
+@keyframes overlay-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

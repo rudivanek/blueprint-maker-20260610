@@ -11,7 +11,7 @@
 // - Download as standalone .html / copy to clipboard
 // - Generated HTML persists per page via onHtmlSaved (Supabase pages.generated_html)
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Wand2, Loader2, AlertCircle, Download, Copy, Check, Columns2,
   Monitor, Tablet, Smartphone, RefreshCw, XCircle,
@@ -20,6 +20,7 @@ import { useGenerateHtml } from '../../hooks/useGenerateHtml';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
+import { jobStore } from '../../lib/jobStore';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -54,9 +55,31 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const hasKey = !!activeAIKey;
   const hasSections = sections.length > 0;
 
+  // Blocking overlay (lib/jobStore): live status ("Generating... 28.2K characters"), Cancel aborts.
+  const jobRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobRef.current !== null) jobStore.update(jobRef.current, localStatus || gen.status);
+  }, [localStatus, gen.status]);
+
   const runGenerate = async (isRegenerate: boolean) => {
     if (!hasKey || !hasSections) return;
+    const jobId = jobStore.start({
+      kind: 'generate',
+      title: isRegenerate ? 'Applying your changes…' : 'Generating the prototype…',
+      estimate: 'Usually 2–4 minutes',
+      cancel: gen.cancel,
+    });
+    if (jobId === null) return;
+    jobRef.current = jobId;
+    try {
+      await generateNow(isRegenerate, jobId);
+    } finally {
+      jobStore.finish(jobId);
+      jobRef.current = null;
+    }
+  };
 
+  const generateNow = async (isRegenerate: boolean, jobId: number) => {
     // Prepare screenshot slices as visual reference (best effort)
     let slices: string[] = [];
     if (screenshot) {
@@ -64,6 +87,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       slices = await prepareScreenshotForAI(screenshot, 4);
     }
     setLocalStatus('');
+    if (jobStore.isCancelled(jobId)) return;
 
     const result = await gen.generate({
       designMd,
@@ -75,7 +99,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       feedback: isRegenerate && feedback.trim() ? feedback.trim() : undefined,
     });
 
-    if (result) {
+    if (result && !jobStore.isCancelled(jobId)) {
       setHtml(result.html);
       onHtmlSaved(page.id, result.html);
       setFeedback('');
