@@ -285,3 +285,4 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     </div>
   );
 }
+
