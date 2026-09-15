@@ -412,3 +412,4 @@ export async function firecrawlScrape<T = unknown>(body: Record<string, unknown>
   usageStore.reportScrape();
   return data;
 }
+
