@@ -192,6 +192,11 @@ export type ProjectPreset = 'clone' | 'restyle' | 'describe' | 'content' | 'manu
 export type AIProvider = 'anthropic' | 'openai';
 
 export interface AppSettings {
+  /**
+   * Step 5: keys live on the server (ai-proxy). In the editor these three
+   * fields only say whether the server has a key ('server') or not ('').
+   * In localStorage they are only read once, to move old keys to the server.
+   */
   firecrawlApiKey: string;
   anthropicApiKey: string;
   openaiApiKey: string;
@@ -349,4 +354,3 @@ export const SECTION_TEMPLATES: Record<string, Partial<Section>> = {
     ],
   },
 };
-
