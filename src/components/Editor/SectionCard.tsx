@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Trash2, GripVertical, Plus, X } from 'lucide-react';
-import type { Section, SectionItem, SectionImage, LayoutContract } from '../../types';
-import { DEFAULT_COPY, DEFAULT_LAYOUT_CONTRACT } from '../../types';
+import type { Section, LayoutContract } from '../../types';
+import { DEFAULT_LAYOUT_CONTRACT, SECTION_TYPES } from '../../types';
 
 interface SectionCardProps {
   section: Section;
@@ -96,12 +96,6 @@ function ContractEditor({ contract, onUpdate, fieldClass }: ContractEditorProps)
     </div>
   );
 }
-
-const SECTION_TYPES = [
-  'Hero (Split)', 'Hero (Centered)', 'Features Grid', 'CTA Banner',
-  'Testimonials', 'FAQ', 'Team', 'Pricing', 'Contact', 'Stats',
-  'Logo Bar', 'Gallery', 'Content (50/50)', 'Content (Full)', 'Nav', 'Footer', 'Custom',
-];
 
 export function SectionCard({ section, onUpdate, onDelete, dragHandleProps }: SectionCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -322,7 +316,7 @@ export function SectionCard({ section, onUpdate, onDelete, dragHandleProps }: Se
                   <label className="text-[10px] text-[#9CA3AF] font-medium uppercase tracking-wider mb-1.5 block">{label}</label>
                   {multiline ? (
                     <textarea
-                      value={(section.copy as Record<string, string>)[field] || ''}
+                      value={(section.copy as unknown as Record<string, string>)[field] || ''}
                       onChange={e => updateCopy(field, e.target.value)}
                       className={`${fieldClass} min-h-[80px]`}
                       rows={3}
@@ -330,7 +324,7 @@ export function SectionCard({ section, onUpdate, onDelete, dragHandleProps }: Se
                   ) : (
                     <input
                       type="text"
-                      value={(section.copy as Record<string, string>)[field] || ''}
+                      value={(section.copy as unknown as Record<string, string>)[field] || ''}
                       onChange={e => updateCopy(field, e.target.value)}
                       className={fieldClass}
                     />
@@ -358,7 +352,7 @@ export function SectionCard({ section, onUpdate, onDelete, dragHandleProps }: Se
                       { f: 'image', p: 'Image URL' },
                       { f: 'link', p: 'Link URL' },
                     ].map(({ f, p }) => (
-                      <input key={f} type="text" value={(item as Record<string, string>)[f] || ''} onChange={e => updateItem(i, f, e.target.value)}
+                      <input key={f} type="text" value={(item as unknown as Record<string, string>)[f] || ''} onChange={e => updateItem(i, f, e.target.value)}
                         className="w-full bg-white border border-[#E5E7EB] rounded-none px-2.5 py-1.5 text-xs text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all"
                         placeholder={p}
                       />
@@ -390,7 +384,7 @@ export function SectionCard({ section, onUpdate, onDelete, dragHandleProps }: Se
                       { f: 'height', p: 'Height (e.g. 600px)' },
                       { f: 'position', p: 'Position in layout (e.g. right-column)' },
                     ].map(({ f, p }) => (
-                      <input key={f} type="text" value={(img as Record<string, string>)[f] || ''} onChange={e => updateImage(i, f, e.target.value)}
+                      <input key={f} type="text" value={(img as unknown as Record<string, string>)[f] || ''} onChange={e => updateImage(i, f, e.target.value)}
                         className="w-full bg-white border border-[#E5E7EB] rounded-none px-2.5 py-1.5 text-xs text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all"
                         placeholder={p}
                       />
