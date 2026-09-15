@@ -74,3 +74,88 @@
     animation: fade-in 200ms ease forwards;
   }
 }
+
+/* ── Help page styles ── */
+.help-body {
+  color: #6B7280;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.help-body p { margin-bottom: 0.75rem; }
+.help-body strong { color: #111827; font-weight: 600; }
+.help-body code {
+  color: #2575FC;
+  background: rgba(37, 117, 252, 0.05);
+  padding: 1px 5px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.help-body ul, .help-body ol {
+  margin: 0.5rem 0 0.75rem;
+  padding-left: 1.25rem;
+}
+.help-body ul { list-style: disc; }
+.help-body ol { list-style: decimal; }
+.help-body li { margin-bottom: 0.35rem; }
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 13px;
+}
+.help-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #111827;
+  border-bottom: 1px solid #E5E7EB;
+  padding: 8px 10px;
+}
+.help-table td {
+  border-bottom: 1px solid #E5E7EB;
+  padding: 8px 10px;
+  color: #6B7280;
+  vertical-align: top;
+}
+.help-table tr:last-child td { border-bottom: none; }
+
+/* ── Print / PDF rules ── */
+@media print {
+  @page { size: A4; margin: 16mm; }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide app chrome */
+  .help-no-print { display: none !important; }
+  header { display: none !important; }
+
+  /* Print-only header on first page */
+  .help-print-header::before {
+    content: "Blueprint Maker — User Guide · version " var(--app-version, "");
+    display: block;
+    font-size: 10px;
+    color: #999;
+    margin-bottom: 8px;
+  }
+
+  /* Each section on its own page, first excepted */
+  .help-section { break-inside: avoid; }
+  .help-section + .help-section { break-before: page; }
+
+  /* Keep steps, tables, and tip boxes together */
+  .help-table { break-inside: avoid; }
+  .help-body { break-inside: avoid; }
+
+  /* Show link URLs */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 10px;
+    color: #999;
+  }
+
+  /* Use full width */
+  .max-w-\[820px\] { max-width: 100% !important; }
+}

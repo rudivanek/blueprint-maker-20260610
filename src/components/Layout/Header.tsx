@@ -1,8 +1,6 @@
 import { Settings, LogOut, ChevronRight, HelpCircle } from 'lucide-react';
-import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import type { User } from '@supabase/supabase-js';
-import { HelpModal } from '../ui/HelpModal';
 import { APP_VERSION } from '../../lib/version';
 
 interface Breadcrumb {
@@ -21,7 +19,6 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
   const navigate = useNavigate();
   const location = useLocation();
   const isSettings = location.pathname === '/settings';
-  const [showHelp, setShowHelp] = useState(false);
 
   return (
     <header className="h-14 bg-white border-b border-[#E5E7EB] flex items-center px-5 gap-4 shrink-0 z-40">
@@ -51,7 +48,7 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
       <div className="ml-auto flex items-center gap-2">
         {rightSlot}
         <button
-          onClick={() => setShowHelp(true)}
+          onClick={() => navigate('/help')}
           className="w-8 h-8 flex items-center justify-center text-[#9CA3AF] hover:text-[#2575FC] hover:bg-[#F9FAFB] transition-colors"
           title="Help"
         >
@@ -77,7 +74,6 @@ export function Header({ user, onSignOut, breadcrumbs, rightSlot }: HeaderProps)
         )}
       </div>
 
-      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </header>
   );
 }

@@ -11,6 +11,7 @@ import { Loader2 } from 'lucide-react';
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
 const EditorPage = lazy(() => import('./pages/EditorPage').then(m => ({ default: m.EditorPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const HelpPage = lazy(() => import('./pages/HelpPage').then(m => ({ default: m.HelpPage })));
 
 function PageLoader() {
   return (
@@ -58,6 +59,7 @@ function AppShell() {
         />
         <Route path="/editor/:projectId" element={<EditorPage user={user} />} />
         <Route path="/settings" element={<SettingsPage user={user} onSignOut={signOut} />} />
+        <Route path="/help" element={<HelpPage user={user} onSignOut={signOut} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
