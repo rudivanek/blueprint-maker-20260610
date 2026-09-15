@@ -25,7 +25,7 @@ const DEFAULT_MAX_SLICES = 5;  // cost guard — taller pages get downscaled ins
  * Tries fetch->blob first (best CORS behavior for Firecrawl storage URLs),
  * falls back to a crossOrigin <img> load.
  */
-async function loadImage(src: string): Promise<HTMLImageElement> {
+export async function loadImage(src: string): Promise<HTMLImageElement> {
   let objectUrl: string | null = null;
   let imgSrc = src;
 
@@ -140,3 +140,41 @@ export function dataUriParts(dataUri: string): { mediaType: string; base64: stri
   if (!match) return null;
   return { mediaType: match[1], base64: match[2] };
 }
+
+// ---------------------------------------------------------------------------
+// Project card thumbnail
+// ---------------------------------------------------------------------------
+
+const THUMB_WIDTH = 400;
+const THUMB_HEIGHT = 250; // 16:10 — the top of the page (header + hero)
+const THUMB_QUALITY = 0.65;
+
+/**
+ * Small JPEG of the top of a page, for the project card (≈15–25 KB).
+ * Returns null on failure — thumbnails are best effort.
+ */
+export async function makeThumbnail(src: string): Promise<string | null> {
+  if (!src) return null;
+  try {
+    const img = await loadImage(src.startsWith('data:') || src.startsWith('http') ? src : `data:image/jpeg;base64,${src}`);
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return null;
+    // Crop the top area with the card's aspect ratio, then scale down.
+    const cropH = Math.min(h, Math.round(w * (THUMB_HEIGHT / THUMB_WIDTH)));
+    const canvas = document.createElement('canvas');
+    canvas.width = THUMB_WIDTH;
+    canvas.height = THUMB_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, w, cropH, 0, 0, THUMB_WIDTH, Math.round(THUMB_WIDTH * (cropH / w)));
+    return canvas.toDataURL('image/jpeg', THUMB_QUALITY);
+  } catch (e) {
+    console.warn('Could not create project thumbnail:', e);
+    return null;
+  }
+}
+
