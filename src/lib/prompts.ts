@@ -333,7 +333,7 @@ BAD layout_description (NEVER do this):
 "Right column: image (640x500px, object-fit cover, 8px border-radius)"
 
 GOOD layout_description (ALWAYS do this when real images exist):
-"Right column: image <img src=\"https://example.com/photo.jpg\"> (640x500px, object-fit cover, 8px border-radius)"
+"Right column: image <img src="https://example.com/photo.jpg"> (640x500px, object-fit cover, 8px border-radius)"
 
 Apply this inline embedding to every real image URL found in the section — hero backgrounds, card thumbnails, content images, gallery images, etc.
 
@@ -354,7 +354,7 @@ If the first content section (excluding nav) has a background-image with overlai
 - Any CTA button styling on top of the image
 
 Example layout_description for a Hero (Image Background):
-"Full-width section, min-height 100vh. Full-bleed background image: <img src=\"https://example.com/hero.jpg\"> (object-fit cover, object-position center). Dark overlay rgba(0,0,0,0.5) on top. Content centered both horizontally and vertically. White uppercase eyebrow label (13px, letter-spacing 3px). White H1 headline (72px, bold). White subheadline (20px, 70% opacity). CTA button row below: primary white button + ghost outline button."
+"Full-width section, min-height 100vh. Full-bleed background image: <img src="https://example.com/hero.jpg"> (object-fit cover, object-position center). Dark overlay rgba(0,0,0,0.5) on top. Content centered both horizontally and vertically. White uppercase eyebrow label (13px, letter-spacing 3px). White H1 headline (72px, bold). White subheadline (20px, 70% opacity). CTA button row below: primary white button + ghost outline button."
 
 ### Rule 5b: Headline sizes — Real pixel values only
 The headline_size field MUST be a real pixel value extracted from the actual CSS font-size on the most prominent heading element in the section.
@@ -399,11 +399,11 @@ The layout_description field will be used by an AI to reconstruct the layout fro
 - "Hero section with background image and text"
 
 ### GOOD example (ALWAYS do this):
-"Full-width section. Dark charcoal background (#1E1E1E). Centered white uppercase label 'OUR SERVICES' (12px, letter-spacing 3px) at top. Below: large serif headline 'Comprehensive Architecture Solutions' (64px, cream #FAF8F2) centered. 24px gap. 3-column grid (1fr 1fr 1fr, 32px gap) below. Each column is a card with: top image <img src=\"https://example.com/card1.jpg\"> (16:9 ratio, object-fit cover, 8px border-radius), below image a cream headline (24px, serif), below that gray body text (16px, sans-serif, 1.6 line-height). Cards have no background/border — just content on the dark section background. On mobile: single column, cards stack vertically with 24px gap."
+"Full-width section. Dark charcoal background (#1E1E1E). Centered white uppercase label 'OUR SERVICES' (12px, letter-spacing 3px) at top. Below: large serif headline 'Comprehensive Architecture Solutions' (64px, cream #FAF8F2) centered. 24px gap. 3-column grid (1fr 1fr 1fr, 32px gap) below. Each column is a card with: top image <img src="https://example.com/card1.jpg"> (16:9 ratio, object-fit cover, 8px border-radius), below image a cream headline (24px, serif), below that gray body text (16px, sans-serif, 1.6 line-height). Cards have no background/border — just content on the dark section background. On mobile: single column, cards stack vertically with 24px gap."
 
 ### Column/grid specifics are mandatory:
 NEVER write vague descriptions like "large images on left and right" or "two columns of content". Instead write:
-- "2-column grid (1fr 1fr, 32px gap), left column: image <img src=\"URL\"> (682x1024px portrait orientation, object-fit cover), right column: image <img src=\"URL\"> (682x1024px portrait orientation)"
+- "2-column grid (1fr 1fr, 32px gap), left column: image <img src="URL"> (682x1024px portrait orientation, object-fit cover), right column: image <img src="URL"> (682x1024px portrait orientation)"
 - "3-column grid (repeat(3, 1fr), 24px column gap, 32px row gap), each cell: [exact description]"
 - "flex row, justify-content space-between, align-items center, gap 48px"
 
@@ -426,7 +426,7 @@ Return a valid JSON object:
       "background_hex": "#XXXXXX — solid background color, OR overlay color if section uses a background-image (e.g. '#000000' for a dark overlay). Never use a solid hex to represent a section that actually has a background-image.",
       "headline_size": "NNpx — the largest text size in this section",
       "layout_variant": "brief variant name e.g. '2-col image-right', '3-col grid', 'full-width centered'",
-      "layout_description": "EXTREMELY DETAILED structural description — embed real image URLs as <img src=\"URL\"> inline, following the GOOD example above",
+      "layout_description": "EXTREMELY DETAILED structural description — embed real image URLs as <img src="URL"> inline, following the GOOD example above",
       "layout_contract": {
         "section_role": "What this section does on the page — its purpose in the user journey. E.g. 'Primary hero — first impression, above the fold' or 'Social proof — builds trust after the hero'",
         "desktop_layout": "Full desktop layout spec in one sentence. E.g. '1280px max-width container, 2-column CSS grid (1fr 1fr): left col = headline + body + CTA button, right col = full-height image object-fit cover'",
@@ -734,4 +734,3 @@ ${pageCustomInstructions ?? page.custom_instructions}
 
 ${sectionsContent}`;
 }
-
