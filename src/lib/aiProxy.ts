@@ -152,9 +152,13 @@ export async function getUsage(days = 30): Promise<UsageRow[]> {
 // SSE reading
 // ---------------------------------------------------------------------------
 
+// Provider SSE events are loosely shaped JSON; fields are checked where used.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SseEvent = Record<string, any>;
+
 async function readSse(
   resp: Response,
-  onEvent: (evt: any) => void,
+  onEvent: (evt: SseEvent) => void,
   signal?: AbortSignal,
 ): Promise<{ cutOff: boolean }> {
   const reader = resp.body!.getReader();
@@ -172,7 +176,7 @@ async function readSse(
         const data = line.slice(5).trim();
         if (!data) continue;
         if (data === '[DONE]') { onEvent({ type: '__done' }); continue; }
-        let evt: any;
+        let evt: SseEvent;
         try { evt = JSON.parse(data); } catch { continue; }
         onEvent(evt);
       }
@@ -197,6 +201,46 @@ export interface AIResult {
   truncated: boolean;
   /** Stream ended without the provider's end marker */
   cutOff: boolean;
+  /** Raw (possibly incomplete) tool-call JSON, for salvaging a cut-off answer */
+  rawToolJson?: string;
+}
+
+/**
+ * From an incomplete tool-call JSON like {"sections":[{...},{...},{"sect
+ * return every array item under `key` that arrived complete.
+ */
+export function salvageArray(json: string, key: string): unknown[] {
+  const start = json.indexOf(`"${key}"`);
+  if (start < 0) return [];
+  const open = json.indexOf('[', start);
+  if (open < 0) return [];
+  const items: unknown[] = [];
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let itemStart = -1;
+  for (let i = open + 1; i < json.length; i++) {
+    const c = json[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{' || c === '[') {
+      if (depth === 0) itemStart = i;
+      depth++;
+    } else if (c === '}' || c === ']') {
+      if (depth === 0) break; // end of the array itself
+      depth--;
+      if (depth === 0 && itemStart >= 0) {
+        try { items.push(JSON.parse(json.slice(itemStart, i + 1))); } catch { /* skip */ }
+        itemStart = -1;
+      }
+    }
+  }
+  return items;
 }
 
 interface CallOpts {
@@ -260,7 +304,7 @@ export async function anthropicCall(body: Record<string, unknown>, opts: CallOpt
   }
   const cutOff = dropped || !sawStop;
   if (cutOff) console.warn('Anthropic stream was cut off before the end.');
-  return { text, toolInput, truncated: cutOff || stopReason === 'max_tokens', cutOff };
+  return { text, toolInput, truncated: cutOff || stopReason === 'max_tokens', cutOff, rawToolJson: toolIdx.length ? toolJson[toolIdx[0]] : undefined };
 }
 
 // ---------------------------------------------------------------------------
@@ -363,10 +407,8 @@ export async function generateText(args: {
 // Firecrawl
 // ---------------------------------------------------------------------------
 
-export async function firecrawlScrape<T = any>(body: Record<string, unknown>, purpose: Purpose, signal?: AbortSignal): Promise<T> {
+export async function firecrawlScrape<T = unknown>(body: Record<string, unknown>, purpose: Purpose, signal?: AbortSignal): Promise<T> {
   const data = await postJson<T>({ action: 'call', provider: 'firecrawl', body, purpose, projectId: currentProjectId }, signal);
   usageStore.reportScrape();
   return data;
 }
-
-
