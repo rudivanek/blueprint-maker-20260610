@@ -250,3 +250,4 @@ Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explan
 
   return { generate, generateFromScratch, cancel, generating, status, error };
 }
+
