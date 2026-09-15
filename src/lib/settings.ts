@@ -23,8 +23,3 @@ export function loadSettings(): AppSettings {
 export function saveSettings(settings: AppSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
-
-export function maskApiKey(key: string): string {
-  if (!key || key.length < 8) return key;
-  return key.slice(0, 8) + '...' + key.slice(-4);
-}
