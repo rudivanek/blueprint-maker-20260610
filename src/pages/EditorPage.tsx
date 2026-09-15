@@ -19,6 +19,7 @@ import { PresetGuide } from '../components/Editor/PresetGuide';
 import { getPreset, type GuideStepId } from '../lib/presets';
 import { loadSettings } from '../lib/settings';
 import { setUsageProject } from '../lib/aiProxy';
+import { makeThumbnail } from '../lib/screenshot';
 import { useKeyStatus } from '../hooks/useKeyStatus';
 import { SECTION_TEMPLATES } from '../types';
 import type { GlobalSettings, Section, Page, ProjectPreset } from '../types';
@@ -156,6 +157,12 @@ export function EditorPage({ user }: EditorPageProps) {
     await reorderPages(reordered);
   };
 
+  // Project card thumbnail: the top of the first page's screenshot.
+  const saveThumbnail = async (screenshot: string) => {
+    const thumb = await makeThumbnail(screenshot);
+    if (thumb) await updateProject({ screenshot_url: thumb });
+  };
+
   const handleStructureImported = async (
     importedSections: Partial<Section>[],
     importedGlobals: Partial<GlobalSettings>,
@@ -170,6 +177,9 @@ export function EditorPage({ user }: EditorPageProps) {
     }
     if (screenshot && activePageId) {
       setScreenshotMap(prev => ({ ...prev, [activePageId]: screenshot }));
+      // First page always refreshes the thumbnail; other pages only fill an empty one.
+      const isFirstPage = pages[0]?.id === activePageId;
+      if (isFirstPage || !project?.screenshot_url) void saveThumbnail(screenshot);
     }
     await replaceAllSections(importedSections);
     triggerSaved();
@@ -204,8 +214,15 @@ export function EditorPage({ user }: EditorPageProps) {
     triggerSaved();
   };
 
-  const handleDesignGenerated = async (designMd: string) => {
+  const handleDesignGenerated = async (designMd: string, meta?: { screenshot?: string; sourceUrl?: string }) => {
     await updateDesignMd(designMd);
+    // Only when the project has no picture yet. Use the design site's screenshot
+    // if it IS the project's site, or if the project has no site of its own
+    // (Describe it myself / Bring my own content).
+    if (meta?.screenshot && project && !project.screenshot_url) {
+      const same = (u?: string) => (u ?? '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '').toLowerCase();
+      if (!project.url || same(project.url) === same(meta.sourceUrl)) void saveThumbnail(meta.screenshot);
+    }
     triggerSaved();
   };
 
