@@ -13,6 +13,8 @@
 // - SSRF guard + size/time caps on every fetch
 // - returns a compact Markdown "evidence digest" ready to paste into a prompt
 
+import { buildFontPlan, fontPlanMarkdown, type FontPlan } from './fonts.ts';
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -69,6 +71,7 @@ export interface TokenResult {
     jsLoadedSuspected: boolean; // WebFont loader etc. — fonts may be injected at runtime
   };
   platform: Platform;
+  fontPlan: FontPlan;           // what the prototype should load (Google-verified, with substitutes)
   diagnostics: {
     htmlSource: 'provided' | 'fetched';
     linkedSheetsFound: number;
@@ -847,8 +850,12 @@ export async function extractDesignTokens(opts: ExtractOptions): Promise<TokenRe
       cssLooksInsufficient: insufficientReasons.length > 0,
       insufficientReasons,
     },
+    fontPlan: { entries: [], googleFontsUrl: null, checkedOnline: false },
     digest: '',
   };
+  try {
+    result.fontPlan = await buildFontPlan(result, opts.fetchImpl);
+  } catch { /* font plan is optional */ }
   result.digest = buildDigest(result);
   return result;
 }
@@ -890,6 +897,8 @@ export function buildDigest(r: TokenResult): string {
   if (f.jsLoadedSuspected) L.push('- ⚠ Fonts may be injected by JavaScript; if the families below look generic, check the screenshot.');
   L.push(`- font-family usage: ${fmt(r.frequency.fontFamilies)}`);
   L.push('');
+  const plan = fontPlanMarkdown(r.fontPlan);
+  if (plan) { L.push(plan); L.push(''); }
 
   if (r.roles.length) {
     L.push('## Evidence by element role (base styles only)');

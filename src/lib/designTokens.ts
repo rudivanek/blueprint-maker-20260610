@@ -10,6 +10,24 @@ import { supabase } from './supabase';
 
 export interface FreqEntry { value: string; count: number; samples: string[] }
 
+export interface FontPlanEntry {
+  family: string;
+  role: string;
+  source: string;
+  onGoogleFonts: boolean;
+  use: string;
+  substituted: boolean;
+  weights: string[];
+  note: string;
+  originalFiles: string[];
+}
+
+export interface FontPlan {
+  entries: FontPlanEntry[];
+  googleFontsUrl: string | null;
+  checkedOnline: boolean;
+}
+
 export interface DesignTokenResult {
   pageUrl: string;
   colors: FreqEntry[];
@@ -25,6 +43,7 @@ export interface DesignTokenResult {
     fontFaces: { family: string; weight: string; style: string; url: string; format: string }[];
     jsLoadedSuspected: boolean;
   };
+  fontPlan?: FontPlan;
   platform: { cms: string | null; builder: string | null; framework: string | null; cssApproach: string; signals: string[] };
   diagnostics: {
     linkedSheetsFound: number;
@@ -83,12 +102,18 @@ export async function fetchDesignTokens(
 export function summarizeTokens(t: DesignTokenResult): string {
   const p = t.platform;
   const platform = [p.cms, p.builder, p.framework].filter(Boolean).map(s => s!.charAt(0).toUpperCase() + s!.slice(1)).join(' + ') || 'Custom site';
-  const families = [...new Set([
-    ...t.fonts.googleFamilies,
-    ...t.fonts.bunnyFamilies,
-    ...t.fonts.fontFaces.map(f => f.family),
-  ])];
-  const fonts = families.length ? `fonts: ${families.slice(0, 4).join(', ')}` : 'no web fonts found';
+  const plan = t.fontPlan?.entries ?? [];
+  let fonts: string;
+  if (plan.length) {
+    fonts = 'fonts: ' + plan.slice(0, 4).map(e => (e.substituted ? `${e.family} → ${e.use}` : e.family)).join(', ');
+  } else {
+    const families = [...new Set([
+      ...t.fonts.googleFamilies,
+      ...t.fonts.bunnyFamilies,
+      ...t.fonts.fontFaces.map(f => f.family),
+    ])];
+    fonts = families.length ? `fonts: ${families.slice(0, 4).join(', ')}` : 'no web fonts found';
+  }
   return `${platform} · ${t.diagnostics.sheetsFetchedOk}/${t.diagnostics.linkedSheetsFound} stylesheets · ${t.colors.length} colours · ${fonts}`;
 }
 
@@ -132,4 +157,17 @@ export function annotateInferredColors(designMd: string, t: DesignTokenResult): 
     return cells.join('|');
   }).join('\n');
   return { text, marked };
+}
+
+/** Warnings about fonts for the UI (substitutions, unverified families, nothing found). */
+export function fontWarnings(t: DesignTokenResult): string[] {
+  const plan = t.fontPlan;
+  if (!plan || !plan.entries.length) {
+    return t.fonts.jsLoadedSuspected ? ['No web fonts found — they may be loaded by JavaScript; check fonts in design.md'] : [];
+  }
+  const out: string[] = [];
+  const subs = plan.entries.filter(e => e.substituted);
+  if (subs.length) out.push(`Not on Google Fonts, substituted: ${subs.map(e => `${e.family} → ${e.use}`).join(', ')}`);
+  if (!plan.checkedOnline) out.push('Some fonts could not be verified on Google Fonts');
+  return out;
 }

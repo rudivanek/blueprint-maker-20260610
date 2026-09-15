@@ -57,6 +57,7 @@ The user message may contain a block titled "CSS EVIDENCE". It was measured by d
 - Use the screenshot to decide which measured colours are prominent (brand, CTA, section backgrounds). Do not invent a colour that appears in neither the evidence nor the screenshot.
 - Hover/focus colours belong in hover states; dark-mode-only colours must not become the main palette.
 - Fonts listed under "Google Fonts loaded" or "Self-hosted @font-face" are real. Use their exact names; include the Google Fonts URL or the @font-face file URL in the Typography section.
+- If a "Font plan" section is present, it is authoritative for typography: use the family in bold for each role, only the listed weights, and put its "Load in the prototype" URL in the Typography section as the font import. When a font was substituted, write it as: Original: <family> (not on Google Fonts) → Use: <substitute>. Never replace a font the plan marks as available on Google Fonts.
 - Every colour row whose hex is NOT listed in the CSS EVIDENCE must end its Usage text with "(inferred)". Do not pad scales: list only the greys and semantic colours that are measured; if the site has none, write one row per missing role marked "(inferred)" instead of a full 50–950 scale.
 - If the evidence says "CSS LOOKS INCOMPLETE", say so in one line at the top of the design.md and rely more on the screenshot.
 

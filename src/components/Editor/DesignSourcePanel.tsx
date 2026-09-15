@@ -4,7 +4,7 @@ import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { ding } from '../../lib/ding';
-import { fetchDesignTokens, summarizeTokens, annotateInferredColors } from '../../lib/designTokens';
+import { fetchDesignTokens, summarizeTokens, annotateInferredColors, fontWarnings } from '../../lib/designTokens';
 import type { AppSettings } from '../../types';
 
 interface DesignSourcePanelProps {
@@ -61,7 +61,7 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated }
         const d = tokens.data.diagnostics;
         const warnings = [
           d.cssLooksInsufficient ? `CSS looks incomplete: ${d.insufficientReasons.join('; ')}` : '',
-          tokens.data.fonts.jsLoadedSuspected ? 'Fonts may be loaded by JavaScript — check fonts in design.md' : '',
+          ...fontWarnings(tokens.data),
         ].filter(Boolean);
         setCssSummary({ text: summarizeTokens(tokens.data), warning: warnings.length ? warnings.join(' · ') : null });
       } else {
