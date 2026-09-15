@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import JSZip from 'jszip';
 import type { Project, Page, Section } from '../types';
 import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
 import { checkFabrication, factCheckMd } from '../lib/pageAssets';
@@ -32,6 +31,8 @@ export function useExport() {
   ) => {
     setExporting(true);
     try {
+      // Loaded only when a ZIP is exported (keeps it out of the first download)
+      const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
       const globals = project.globals;
       const multiPage = pages.length > 1;
@@ -143,4 +144,3 @@ ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual referenc
 
   return { exportZip, downloadFile, copyToClipboard, exporting };
 }
-
