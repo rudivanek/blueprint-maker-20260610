@@ -17,6 +17,7 @@
 import { useState } from 'react';
 import { DESIGN_SYSTEM_EXTRACTION_PROMPT, STRUCTURE_IMPORT_PROMPT } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
+import { anthropicCall, openaiCall, type Purpose } from '../lib/aiProxy';
 import type { Section, GlobalSettings, AIProvider } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -53,18 +54,6 @@ interface AIResult {
 // Anthropic
 // ---------------------------------------------------------------------------
 
-interface AnthropicContentBlock {
-  type: string;
-  text?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-}
-
-interface AnthropicResponse {
-  content: AnthropicContentBlock[];
-  stop_reason?: string;
-}
-
 interface AnthropicTool {
   name: string;
   description: string;
@@ -85,74 +74,29 @@ function toAnthropicContent(parts: ContentPart[]): unknown[] {
     .filter(Boolean) as unknown[];
 }
 
+// Step 5: calls go through the ai-proxy edge function (lib/aiProxy.ts).
 async function callAnthropic(
-  apiKey: string,
   messages: AIMessage[],
   systemPrompt: string,
-  options?: { tool?: AnthropicTool; maxTokens?: number }
+  options: { purpose: Purpose; tool?: AnthropicTool; maxTokens?: number }
 ): Promise<AIResult> {
-  const maxTokens = options?.maxTokens ?? 32000;
-
   const body: Record<string, unknown> = {
-    model: 'claude-sonnet-4-6',
-    max_tokens: maxTokens,
+    max_tokens: options.maxTokens ?? 32000,
     system: systemPrompt,
     messages: messages.map(m => ({ role: m.role, content: toAnthropicContent(m.content) })),
   };
-
-  if (options?.tool) {
+  if (options.tool) {
     body.tools = [options.tool];
     body.tool_choice = { type: 'tool', name: options.tool.name };
   }
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => response.text());
-    console.error('Anthropic API error:', JSON.stringify(errorBody, null, 2));
-    const message = typeof errorBody === 'object' && errorBody !== null
-      ? (errorBody as { error?: { message?: string } }).error?.message ?? JSON.stringify(errorBody)
-      : String(errorBody);
-    throw new Error(`Anthropic API error: ${response.status} — ${message}`);
-  }
-
-  const data: AnthropicResponse = await response.json();
-
-  // Join ALL text blocks (previous version only read content[0])
-  const text = (data.content || [])
-    .filter(b => b.type === 'text' && typeof b.text === 'string')
-    .map(b => b.text as string)
-    .join('\n');
-
-  // Find a tool_use block if one exists
-  const toolBlock = (data.content || []).find(b => b.type === 'tool_use');
-  const toolInput =
-    toolBlock?.input && typeof toolBlock.input === 'object'
-      ? (toolBlock.input as Record<string, unknown>)
-      : null;
-
-  const truncated = data.stop_reason === 'max_tokens';
-  if (truncated) console.warn('Anthropic response hit max_tokens — output is truncated');
-
-  return { text, toolInput, truncated };
+  const result = await anthropicCall(body, { purpose: options.purpose });
+  if (result.truncated) console.warn('Anthropic response is incomplete (max_tokens or cut off)');
+  return { text: result.text, toolInput: result.toolInput, truncated: result.truncated };
 }
 
 // ---------------------------------------------------------------------------
 // OpenAI
 // ---------------------------------------------------------------------------
-
-interface OpenAIResponse {
-  choices: Array<{ message: { content: string }; finish_reason?: string }>;
-}
 
 function toOpenAIContent(parts: ContentPart[]): unknown {
   // Plain string when text-only (cheaper, simpler)
@@ -167,50 +111,20 @@ function toOpenAIContent(parts: ContentPart[]): unknown {
 }
 
 async function callOpenAI(
-  apiKey: string,
   messages: AIMessage[],
   systemPrompt: string,
-  options?: { jsonMode?: boolean; maxTokens?: number }
+  options: { purpose: Purpose; jsonMode?: boolean; maxTokens?: number }
 ): Promise<AIResult> {
-  const maxTokens = options?.maxTokens ?? 32000;
-
   const body: Record<string, unknown> = {
-    model: 'gpt-4.1',
-    max_tokens: maxTokens,
+    max_tokens: options.maxTokens ?? 32000,
     messages: [
       { role: 'system', content: systemPrompt },
       ...messages.map(m => ({ role: m.role, content: toOpenAIContent(m.content) })),
     ],
   };
-  if (options?.jsonMode) {
-    body.response_format = { type: 'json_object' };
-  }
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => response.text());
-    console.error('OpenAI API error:', JSON.stringify(errorBody, null, 2));
-    const message = typeof errorBody === 'object' && errorBody !== null
-      ? (errorBody as { error?: { message?: string } }).error?.message ?? JSON.stringify(errorBody)
-      : String(errorBody);
-    throw new Error(`OpenAI API error: ${response.status} — ${message}`);
-  }
-
-  const data: OpenAIResponse = await response.json();
-  const choice = data.choices?.[0];
-  return {
-    text: choice?.message?.content ?? '',
-    toolInput: null,
-    truncated: choice?.finish_reason === 'length',
-  };
+  if (options.jsonMode) body.response_format = { type: 'json_object' };
+  const result = await openaiCall(body, { purpose: options.purpose });
+  return { text: result.text, toolInput: null, truncated: result.truncated };
 }
 
 // ---------------------------------------------------------------------------
@@ -458,12 +372,10 @@ function parseStructureJson(raw: string): { sections: Partial<Section>[]; global
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useAI(provider: AIProvider, anthropicKey: string, openaiKey: string) {
+export function useAI(provider: AIProvider) {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
-
-  const activeKey = provider === 'openai' ? openaiKey : anthropicKey;
 
   /**
    * Generate design.md from extract data + raw HTML CSS + (NEW) screenshot slices.
@@ -526,9 +438,10 @@ Please generate the complete design.md file following the exact format specified
       setStatus(`AI is generating design system${screenshots.length > 0 ? ' (with visual reference)' : ''}...`);
 
       const messages = [userMessage(userText, screenshots)];
+      const purpose: Purpose = rawHtml && Object.keys(extractData).length === 0 && screenshots.length === 0 && !cssEvidence ? 'design-from-html' : 'design-system';
       const result = provider === 'openai'
-        ? await callOpenAI(activeKey, messages, DESIGN_SYSTEM_EXTRACTION_PROMPT)
-        : await callAnthropic(activeKey, messages, DESIGN_SYSTEM_EXTRACTION_PROMPT, { maxTokens: 16000 });
+        ? await callOpenAI(messages, DESIGN_SYSTEM_EXTRACTION_PROMPT, { purpose })
+        : await callAnthropic(messages, DESIGN_SYSTEM_EXTRACTION_PROMPT, { purpose, maxTokens: 16000 });
 
       setStatus('Design system generated.');
       return result.text || null;
@@ -610,8 +523,8 @@ ${uniqueNavLinks.join('\n')}
     try {
       const messages = [userMessage(userText, screenshots)];
       const result = provider === 'openai'
-        ? await callOpenAI(activeKey, messages, systemPrompt)
-        : await callAnthropic(activeKey, messages, systemPrompt, { maxTokens: 16000 });
+        ? await callOpenAI(messages, systemPrompt, { purpose: 'wp-extract' })
+        : await callAnthropic(messages, systemPrompt, { purpose: 'wp-extract', maxTokens: 16000 });
       setStatus('WordPress content extracted.');
       return result.text || null;
     } catch (e) {
@@ -632,7 +545,8 @@ ${uniqueNavLinks.join('\n')}
   const importPageStructure = async (
     rawHtml: string,
     compactMode = false,
-    screenshots: string[] = []
+    screenshots: string[] = [],
+    importPurpose: Purpose = 'structure-import'
   ): Promise<{
     sections: Partial<Section>[];
     globals: Partial<GlobalSettings>;
@@ -676,7 +590,7 @@ ${provider === 'openai'
       let wasTruncated = false;
 
       if (provider === 'openai') {
-        const result = await callOpenAI(activeKey, messages, STRUCTURE_IMPORT_PROMPT, { jsonMode: true });
+        const result = await callOpenAI(messages, STRUCTURE_IMPORT_PROMPT, { purpose: importPurpose, jsonMode: true });
         wasTruncated = result.truncated;
         setStatus('Parsing AI response...');
         const parsed = parseStructureJson(result.text);
@@ -684,7 +598,8 @@ ${provider === 'openai'
         sections = parsed.sections;
         globals = parsed.globals;
       } else {
-        const result = await callAnthropic(activeKey, messages, STRUCTURE_IMPORT_PROMPT, {
+        const result = await callAnthropic(messages, STRUCTURE_IMPORT_PROMPT, {
+          purpose: importPurpose,
           tool: STRUCTURE_TOOL,
           maxTokens: 32000,
         });
