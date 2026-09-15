@@ -282,7 +282,8 @@ Deno.serve(async (req: Request) => {
       meter.end();
       await updateUsage(usageId, {
         status: meter.status(),
-        http_status: upstream.status,
+        http_status: upstream
+          .status,
         input_tokens: meter.inputTokens,
         output_tokens: meter.outputTokens,
         duration_ms: Date.now() - started,
