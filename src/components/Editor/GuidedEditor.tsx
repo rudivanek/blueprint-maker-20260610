@@ -373,7 +373,7 @@ function DesignStep(p: StepProps) {
             onClick={() => setShowFile(v => !v)}
             className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[#111827]"
           >
-            {hasDesign ? 'View or edit design.md' : 'Write design.md by hand'}
+            {hasDesign ? 'Paste or edit design.md' : 'Write design.md by hand'}
             {showFile ? <ChevronUp className="w-4 h-4 text-[#9CA3AF]" /> : <ChevronDown className="w-4 h-4 text-[#9CA3AF]" />}
           </button>
           {showFile && (

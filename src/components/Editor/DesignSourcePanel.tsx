@@ -193,7 +193,7 @@ export function DesignSourcePanel({ projectUrl, appSettings, onDesignGenerated, 
   const modeButtons: { id: SourceMode; icon: typeof Link; label: string; desc: string }[] = [
     { id: 'page-url', icon: Link, label: 'Page URL', desc: 'Use main project URL' },
     { id: 'different-url', icon: ExternalLink, label: 'Other URL', desc: 'Use a reference site' },
-    { id: 'upload', icon: Upload, label: 'Upload .md', desc: 'Load from file' },
+    { id: 'upload', icon: Upload, label: 'Upload .md', desc: 'Load from file (or paste it below)' },
     { id: 'paste-html', icon: Code, label: 'Paste HTML', desc: 'Paste raw HTML code' },
   ];
 
