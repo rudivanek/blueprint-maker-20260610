@@ -869,7 +869,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
               title="Ctrl/⌘ + Enter"
               className="flex items-center gap-1.5 px-4 py-2 bg-[#F9FAFB] hover:bg-white border border-[#E5E7EB] hover:border-[#2575FC] text-sm text-[#111827] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Apply Changes
+              <RefreshCw className="w-3.5 h-3.5" /> Apply
             </button>
           </div>
         )}
