@@ -42,16 +42,30 @@ interface ImportPanelProps {
   /** "Write it for me": page id (to remember the description) and a starting description */
   pageId?: string;
   initialDescription?: string;
+  /** How many sections the page has now — used to warn before replacing them */
+  existingSections?: number;
+  /** Reports whether there is new pasted/written text that isn't built into sections yet */
+  onPendingChange?: (pending: boolean) => void;
 }
 
 type ImportStatus = 'idle' | 'loading' | 'success' | 'error' | 'truncated';
 
-export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImported, onPageUrlChange, initialSource = 'url', initialContent = '', pageName = 'Page', pageId = 'page', initialDescription = '' }: ImportPanelProps) {
+export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImported, onPageUrlChange, initialSource = 'url', initialContent = '', pageName = 'Page', pageId = 'page', initialDescription = '', existingSections = 0, onPendingChange }: ImportPanelProps) {
   const [url, setUrl] = useState(pageUrl || projectUrl || '');
   const [source, setSource] = useState<'url' | 'paste' | 'write'>(initialSource);
   const [content, setContent] = useState(initialContent);
   // true while the text in "Paste my content" was written by the AI
   const [contentIsAi, setContentIsAi] = useState(false);
+  // The text the current sections were built from (starts as the text we were given).
+  const [builtContent, setBuiltContent] = useState(initialContent);
+  const pendingText = content.trim().length > 0 && content.trim() !== builtContent.trim();
+  useEffect(() => { onPendingChange?.(pendingText); }, [pendingText, onPendingChange]);
+  useEffect(() => () => onPendingChange?.(false), [onPendingChange]);
+
+  /** Ask before an import/build replaces the page's current sections. */
+  const confirmReplace = (what: string) =>
+    existingSections === 0 ||
+    window.confirm(`${what} replaces this page's ${existingSections} current section${existingSections === 1 ? '' : 's'} and its copy.md. Continue?`);
   const [isWordPress, setIsWordPress] = useState(false);
   const [structureStatus, setStructureStatus] = useState<ImportStatus>('idle');
   const [currentStatus, setCurrentStatus] = useState('');
@@ -123,7 +137,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     }
   };
 
-  const handleStructureImport = () => withJob('Importing the page…', 'Usually 1–3 minutes', async () => {
+  const handleStructureImport = () => confirmReplace('Importing this page') && withJob('Importing the page…', 'Usually 1–3 minutes', async () => {
     if (!url || !hasKeys) return;
     setStructureStatus('loading');
     setShowCompact(false);
@@ -178,7 +192,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     }
   });
 
-  const handleContentImport = () => withJob('Building sections from your text…', 'Usually about 30 seconds', async () => {
+  const handleContentImport = () => confirmReplace('Building sections from your text') && withJob('Building sections from your text…', 'Usually about 30 seconds', async () => {
     if (content.trim().length < 20 || !hasAIKey) return;
     setStructureStatus('loading');
     setShowCompact(false);
@@ -190,7 +204,9 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
       lastScreenshotSlices.current = [];
       lastScreenshotUrl.current = undefined;
       setCurrentStatus(`Analyzing your content with ${providerLabel}...`);
+      const built = content;
       await runImport(html, false, [], undefined, true);
+      if (!jobStore.isCancelled(jobRef.current)) setBuiltContent(built);
     } catch (e) {
       if (stopIfCancelled()) return;
       setStructureStatus('error');
@@ -328,6 +344,12 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
             className="w-full bg-white border border-[#E5E7EB] rounded-none px-3 py-2.5 text-xs font-mono leading-relaxed text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all disabled:opacity-50 resize-y mb-1"
           />
           <p className="text-[10px] text-[#9CA3AF] mb-3">Each # or ## heading starts a section. Your text is saved as copy.md and used word for word. No Firecrawl call.</p>
+          {pendingText && existingSections > 0 && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 px-3 py-2 mb-3 text-xs text-amber-800">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span><b>This text isn't used yet.</b> The page still has its previous {existingSections} section{existingSections === 1 ? '' : 's'}. Click <b>Build Sections</b> to replace them with this text.</span>
+            </div>
+          )}
           {contentIsAi && (() => {
             const ph = findPlaceholders(content);
             return (
@@ -349,7 +371,11 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
           <button
             onClick={handleContentImport}
             disabled={content.trim().length < 20 || !hasAIKey || isLoading}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#F9FAFB] hover:bg-white border border-[#E5E7EB] hover:border-[#2575FC] rounded-none text-sm text-[#111827] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`w-full flex items-center justify-center gap-2 py-2.5 border rounded-none text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              pendingText
+                ? 'bg-[#2575FC] hover:bg-[#1a5fe0] border-[#2575FC] text-white'
+                : 'bg-[#F9FAFB] hover:bg-white border-[#E5E7EB] hover:border-[#2575FC] text-[#111827]'
+            }`}
           >
             {structureStatus === 'loading' ? <Loader2 className="w-4 h-4 text-[#2575FC] animate-spin" /> :
              structureStatus === 'success' ? <CheckCircle className="w-4 h-4 text-green-600" /> :

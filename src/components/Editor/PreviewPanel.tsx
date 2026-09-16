@@ -21,6 +21,7 @@ import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
 import { jobStore } from '../../lib/jobStore';
+import { previewSource, stampHtml, isPreviewOutdated } from '../../lib/previewStamp';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -54,6 +55,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const activeAIKey = appSettings.aiProvider === 'openai' ? appSettings.openaiApiKey : appSettings.anthropicApiKey;
   const hasKey = !!activeAIKey;
   const hasSections = sections.length > 0;
+  // The saved prototype was built from older sections / an older design
+  const source = previewSource(designMd, globals, sections);
+  const outdated = isPreviewOutdated(html, source);
 
   // Blocking overlay (lib/jobStore): live status ("Generating... 28.2K characters"), Cancel aborts.
   const jobRef = useRef<number | null>(null);
@@ -100,8 +104,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     });
 
     if (result && !jobStore.isCancelled(jobId)) {
-      setHtml(result.html);
-      onHtmlSaved(page.id, result.html);
+      const stamped = stampHtml(result.html, source);
+      setHtml(stamped);
+      onHtmlSaved(page.id, stamped);
       setFeedback('');
       ding();
       if (result.truncated) {
@@ -152,7 +157,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             className="flex items-center gap-2 px-4 py-2 bg-[#2575FC] hover:bg-[#1a5fe0] text-white text-sm font-medium rounded-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {gen.generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-            {html ? 'Generate Fresh' : 'Generate HTML'}
+            {outdated ? 'Generate new prototype' : html ? 'Generate Fresh' : 'Generate HTML'}
           </button>
 
           {gen.generating && (
@@ -213,6 +218,15 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             <Download className="w-3.5 h-3.5" /> Download .html
           </button>
         </div>
+
+        {outdated && !isBusy && (
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 px-3 py-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <p className="text-amber-700 text-xs">
+              <b>This prototype is outdated.</b> It was made before the sections or the design changed, so it still shows the previous content. Click <b>Generate new prototype</b> to build it again (2–4 minutes, ≈ $0.30).
+            </p>
+          </div>
+        )}
 
         {/* Feedback / regenerate row */}
         {html && (
@@ -309,4 +323,3 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     </div>
   );
 }
-

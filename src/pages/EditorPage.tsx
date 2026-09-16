@@ -15,6 +15,7 @@ import { ImportPanel } from '../components/Editor/ImportPanel';
 import { CreatePanel } from '../components/Editor/CreatePanel';
 import { ExportPanel } from '../components/Export/ExportPanel';
 import { PreviewPanel } from '../components/Editor/PreviewPanel';
+import { previewSource, isPreviewOutdated } from '../lib/previewStamp';
 import { PresetGuide } from '../components/Editor/PresetGuide';
 import { ProcessingOverlay } from '../components/ui/ProcessingOverlay';
 import { GuidedEditor } from '../components/Editor/GuidedEditor';
@@ -593,7 +594,7 @@ export function EditorPage({ user }: EditorPageProps) {
                   done={{
                     design: !!project.design_md?.trim(),
                     structure: sections.length > 0,
-                    preview: !!activePage.generated_html,
+                    preview: !!activePage.generated_html && !isPreviewOutdated(activePage.generated_html, previewSource(project.design_md, project.globals, sections)),
                   }}
                   onGo={handleGuideGo}
                   onChangePreset={handlePresetChange}
@@ -626,6 +627,7 @@ export function EditorPage({ user }: EditorPageProps) {
                     initialSource={presetDef?.importStart === 'paste' ? 'paste' : 'url'}
                     initialContent={presetDef?.id === 'content' ? (project.brief || '') : ''}
                     pageName={activePage.page_name}
+                    existingSections={sections.length}
                   />
                 </div>
 

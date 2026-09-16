@@ -8,7 +8,8 @@
 // (ImportPanel, DesignSourcePanel, DesignPanel, SectionCard, PreviewPanel,
 // ExportPanel, CreatePanel) — no AI or data logic lives here.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { previewSource, isPreviewOutdated } from '../../lib/previewStamp';
 import type { ReactNode } from 'react';
 import { Check, Lock, ArrowLeft, ArrowRight, Plus, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { ImportPanel } from './ImportPanel';
@@ -77,6 +78,10 @@ export function GuidedEditor(props: GuidedEditorProps) {
 
   const order: StepId[] = ['content', 'design', 'review', 'prototype', 'export'];
 
+  // New pasted / AI-written text that isn't built into sections yet (reported by ImportPanel)
+  const [pendingText, setPendingText] = useState(false);
+  const onPendingChange = useCallback((v: boolean) => setPendingText(v), []);
+
   const [reviewed, setReviewed] = useState(() => readReviewed(page.id));
   useEffect(() => { setReviewed(readReviewed(page.id)); }, [page.id]);
 
@@ -84,7 +89,7 @@ export function GuidedEditor(props: GuidedEditorProps) {
     content: sections.length > 0,
     design: !!project.design_md?.trim(),
     review: reviewed,
-    prototype: !!page.generated_html,
+    prototype: !!page.generated_html && !isPreviewOutdated(page.generated_html, previewSource(project.design_md, project.globals, sections)),
     export: false,
   };
 
@@ -110,6 +115,8 @@ export function GuidedEditor(props: GuidedEditorProps) {
   const isLast = current >= order.length - 1;
 
   const goNext = () => {
+    if (step === 'content' && pendingText &&
+        !window.confirm("You have new text that isn't built into sections yet, so the next steps will use the page's previous content. Continue anyway?")) return;
     userMoved.current = true;
     if (step === 'review') {
       try { localStorage.setItem(reviewedKey(page.id), '1'); } catch { /* ignore */ }
@@ -172,7 +179,7 @@ export function GuidedEditor(props: GuidedEditorProps) {
 
       {/* Step body */}
       <div className="border border-[#E5E7EB] bg-white">
-        {step === 'content' && <ContentStep {...props} n={current + 1} />}
+        {step === 'content' && <ContentStep {...props} n={current + 1} onPendingChange={onPendingChange} pendingText={pendingText} />}
         {step === 'design' && <DesignStep {...props} n={current + 1} />}
         {step === 'review' && <ReviewStep {...props} n={current + 1} />}
         {step === 'prototype' && <PrototypeStep {...props} n={current + 1} />}
@@ -258,7 +265,16 @@ function countImages(md?: string): number {
 // 1. Content
 // ---------------------------------------------------------------------------
 
-function ContentStep(p: StepProps) {
+/** Where the page's current content came from (shown in "Content is ready"). */
+function contentSource(page: Page): string {
+  const copy = page.copy_md ?? '';
+  if (copy.includes(AI_COPY_MARKER)) return 'Written by AI';
+  if (copy.includes('Texto escrito por el cliente')) return 'Your own text';
+  if (page.page_url) return `Imported from ${page.page_url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}`;
+  return copy ? 'Imported' : 'Added by hand';
+}
+
+function ContentStep(p: StepProps & { onPendingChange: (v: boolean) => void; pendingText: boolean }) {
   const preset = getPreset(p.project.preset);
   const mode = contentModeFor(preset?.id);
   const restyle = preset?.id === 'restyle';
@@ -302,17 +318,25 @@ function ContentStep(p: StepProps) {
           pageName={p.page.page_name}
           pageId={p.page.id}
           initialDescription={preset?.id === 'describe' ? (p.project.brief || '') : ''}
+          existingSections={p.sections.length}
+          onPendingChange={p.onPendingChange}
         />
         {p.sections.length > 0 && (
           <div className="border border-green-200 bg-green-50 px-4 py-3">
-            <p className="text-sm font-semibold text-green-700 mb-2 flex items-center gap-1.5"><Check className="w-4 h-4" /> Content is ready</p>
+            <p className="text-sm font-semibold text-green-700 mb-2 flex items-center gap-1.5 flex-wrap">
+              <Check className="w-4 h-4" /> {p.pendingText ? 'Current content' : 'Content is ready'}
+              <span className="font-normal text-xs text-green-800 bg-white border border-green-200 px-2 py-0.5">{contentSource(p.page)}</span>
+            </p>
             <div className="flex flex-wrap gap-2">
               <Stat label="Sections" value={p.sections.length} />
               <Stat label="Words" value={countWords(p.page.copy_md).toLocaleString()} />
               <Stat label="Images" value={countImages(p.page.images_md)} />
               <Stat label="Screenshot" value={p.screenshotMap[p.page.id] ? 'saved' : '—'} />
             </div>
-            <p className="text-xs text-green-800 mt-2">Building or importing again replaces these sections.</p>
+            <p className="text-xs text-green-800 mt-2">
+              {p.pendingText
+                ? 'This is what the page uses now — your new text above is not built yet.'
+                : 'Building or importing again replaces these sections (you will be asked first).'}</p>
           </div>
         )}
       </div>
