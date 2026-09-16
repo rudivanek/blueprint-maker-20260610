@@ -213,3 +213,7 @@ ${pagesBlock(p, output)}
 export function readmePromptLines(t: ExportTargets): string {
   return combos(t).map(c => `- ${promptFileName(c.tool, c.output)} — first message for ${comboLabel(c.tool, c.output)}`).join('\n');
 }
+
+
+
+
