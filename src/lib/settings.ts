@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   anthropicApiKey: '',
   openaiApiKey: '',
   aiProvider: 'anthropic',
+  defaultModel: 'claude-sonnet-5',
   defaultImageInstructions: 'Use https://placehold.co/[width]x[height]/[bg-hex]/[text-hex] for missing images.',
 };
 
@@ -23,4 +24,3 @@ export function loadSettings(): AppSettings {
 export function saveSettings(settings: AppSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
-

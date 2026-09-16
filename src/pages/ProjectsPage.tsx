@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Globe, Clock, Trash2, Loader2, FolderOpen, ArrowRight, ArrowLeft, Upload, CheckCircle, X, Copy, Pencil } from 'lucide-react';
 import { useProjects } from '../hooks/useProjects';
+import { useKeyStatus } from '../hooks/useKeyStatus';
+import { ModelSelect } from '../components/ui/ModelSelect';
+import { loadSettings } from '../lib/settings';
+import { DEFAULT_MODEL } from '../lib/models';
 import { PRESETS, getPreset } from '../lib/presets';
 import type { ProjectPreset } from '../types';
 import type { User } from '@supabase/supabase-js';
@@ -24,6 +28,8 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
   const [designSource, setDesignSource] = useState<'url' | 'file'>('url');
   const [designFile, setDesignFile] = useState<{ name: string; text: string } | null>(null);
   const [brief, setBrief] = useState('');
+  const [aiModel, setAiModel] = useState(DEFAULT_MODEL);
+  const keyStatus = useKeyStatus();
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -37,6 +43,7 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
     setDesignSource('url');
     setDesignFile(null);
     setBrief('');
+    setAiModel(loadSettings().defaultModel || DEFAULT_MODEL);
     setShowNewModal(true);
   };
 
@@ -72,6 +79,7 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
       design_url: usesDesignFile ? '' : designUrl.trim(),
       design_md: usesDesignFile ? designFile?.text : undefined,
       brief: brief.trim(),
+      ai_model: aiModel,
       firstPage: isManual ? undefined : { name: 'Home', slug: '/', url },
     });
     setCreating(false);
@@ -374,6 +382,12 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
                       )}
                     </div>
                   )}
+
+                  <div>
+                    <label htmlFor="new-project-model" className="text-xs text-[#111827] font-medium mb-1.5 block">AI model</label>
+                    <ModelSelect id="new-project-model" value={aiModel} onChange={setAiModel} status={keyStatus.status} />
+                    <p className="text-[10px] text-[#9CA3AF] mt-1">Used for everything the AI does in this project. You can change it later in the editor.</p>
+                  </div>
 
                   {def.id !== 'manual' && (
                     <p className="text-[10px] text-[#9CA3AF]">A first page (“Home”) is created and the editor shows the next steps.</p>

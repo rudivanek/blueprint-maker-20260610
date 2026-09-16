@@ -1,3 +1,5 @@
+import { ModelSelect } from '../components/ui/ModelSelect';
+import { DEFAULT_MODEL, providerOf } from '../lib/models';
 import { useState } from 'react';
 import { Save, Check, Bot } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
@@ -6,7 +8,7 @@ import { loadSettings, saveSettings } from '../lib/settings';
 import { ServerKeysCard } from '../components/Settings/ServerKeysCard';
 import { UsageCard } from '../components/Settings/UsageCard';
 import { useKeyStatus } from '../hooks/useKeyStatus';
-import type { AppSettings, AIProvider } from '../types';
+import type { AppSettings } from '../types';
 
 interface SettingsPageProps {
   user: User;
@@ -42,37 +44,22 @@ export function SettingsPage({ user, onSignOut }: SettingsPageProps) {
 
           <UsageCard status={keys.status} />
 
-          {/* AI Provider */}
+          {/* Default AI model */}
           <div className="bg-white border border-[#E5E7EB] mb-4">
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex items-center gap-2.5">
               <Bot className="w-4 h-4 text-[#9CA3AF]" />
-              <h2 className="text-[#111827] font-medium text-sm">AI Provider</h2>
+              <h2 className="text-[#111827] font-medium text-sm">Default AI model</h2>
             </div>
             <div className="p-5">
-              <label className="text-xs text-[#111827] font-medium mb-2 block">Active Provider</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(['anthropic', 'openai'] as AIProvider[]).map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setSettings(s => ({ ...s, aiProvider: p }))}
-                    className={`flex flex-col gap-0.5 px-4 py-3 border text-left transition-all rounded-none ${
-                      settings.aiProvider === p
-                        ? 'bg-[#2575FC]/5 border-[#2575FC] text-[#111827]'
-                        : 'bg-white border-[#E5E7EB] text-[#9CA3AF] hover:border-[#2575FC] hover:text-[#111827]'
-                    }`}
-                  >
-                    <span className="text-sm font-medium">
-                      {p === 'anthropic' ? 'Anthropic' : 'OpenAI'}
-                    </span>
-                    <span className="text-[11px] opacity-70">
-                      {p === 'anthropic' ? 'Claude Sonnet 4.6' : 'GPT-4.1'}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <label htmlFor="default-model" className="text-xs text-[#111827] font-medium mb-2 block">For new projects</label>
+              <ModelSelect
+                id="default-model"
+                value={settings.defaultModel || DEFAULT_MODEL}
+                status={keys.status}
+                onChange={id => setSettings(s => ({ ...s, defaultModel: id, aiProvider: providerOf(id) }))}
+              />
               <p className="text-[#9CA3AF] text-xs mt-2.5">
-                The selected provider will be used for design system extraction and structure analysis.
+                Each project has its own AI model — choose it when you create the project, or change it in the editor header. Older projects use Claude Sonnet 4.6 until you change them.
               </p>
             </div>
           </div>
@@ -129,4 +116,3 @@ export function SettingsPage({ user, onSignOut }: SettingsPageProps) {
     </div>
   );
 }
-

@@ -24,6 +24,8 @@ import { GuidedEditor } from '../components/Editor/GuidedEditor';
 import { getPreset, type GuideStepId } from '../lib/presets';
 import { loadSettings } from '../lib/settings';
 import { setUsageProject } from '../lib/aiProxy';
+import { LEGACY_MODEL, providerOf, setActiveModel } from '../lib/models';
+import { ModelSelect } from '../components/ui/ModelSelect';
 import { makeThumbnail } from '../lib/screenshot';
 import { useKeyStatus } from '../hooks/useKeyStatus';
 import { SECTION_TEMPLATES } from '../types';
@@ -40,13 +42,18 @@ export function EditorPage({ user }: EditorPageProps) {
   const navigate = useNavigate();
   // Step 5: keys are on the server; the key fields only flag availability.
   const keyStatus = useKeyStatus();
+  const { project, loading: projectLoading, updateGlobals, updateDesignMd, updateProject } = useProject(projectId);
+  // The project's AI model decides model AND provider for every AI call (lib/models)
+  const projectModel = project?.ai_model || LEGACY_MODEL;
+  setActiveModel(project ? projectModel : null);
+  useEffect(() => () => setActiveModel(null), []);
   const appSettings = {
     ...loadSettings(),
+    aiProvider: providerOf(projectModel),
     anthropicApiKey: keyStatus.has.anthropic ? 'server' : '',
     openaiApiKey: keyStatus.has.openai ? 'server' : '',
     firecrawlApiKey: keyStatus.has.firecrawl ? 'server' : '',
   };
-  const { project, loading: projectLoading, updateGlobals, updateDesignMd, updateProject } = useProject(projectId);
   const { pages, loading: pagesLoading, createPage, updatePage, deletePage, reorderPages } = usePages(projectId);
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const { sections, createSection, updateSection, deleteSection, restoreSection, replaceAllSections } = useSections(activePageId || undefined);
@@ -340,6 +347,15 @@ export function EditorPage({ user }: EditorPageProps) {
         breadcrumbs={[{ label: 'Projects', href: '/' }, { label: project.name }]}
         rightSlot={
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-[#6B7280]" title="AI model used for this project">
+              <span className="hidden md:inline">AI model</span>
+              <ModelSelect
+                compact
+                value={projectModel}
+                status={keyStatus.status}
+                onChange={id => { void updateProject({ ai_model: id }); triggerSaved(); }}
+              />
+            </label>
             <div className="flex border border-[#E5E7EB] text-xs" title="Guided = step by step · Advanced = the full editor">
               {(['guided', 'advanced'] as const).map(m => (
                 <button

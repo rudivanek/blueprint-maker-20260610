@@ -3,6 +3,7 @@
 // Toolbar for "Edit on page" (see lib/visualEdit): shows the selected element
 // and the direct edits for it — text, image, link, delete — plus Undo / Done.
 
+import { cost } from '../../lib/models';
 import { useEffect, useState } from 'react';
 import { ArrowUp, Check, Image as ImageIcon, Link2, MousePointerClick, Sparkles, Trash2, Type, Undo2, X } from 'lucide-react';
 import type { Selection } from '../../lib/visualEdit';
@@ -115,7 +116,7 @@ export function VisualEditBar(p: VisualEditBarProps) {
                 aria-label="Change this element with AI"
                 className={`${input} resize-y leading-snug`}
               />
-              <button type="submit" disabled={!ask.trim()} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2575FC] hover:bg-[#1a5fe0] text-white text-xs font-medium disabled:opacity-40 shrink-0" title="Ctrl/⌘ + Enter · ≈ $0.02–0.08">
+              <button type="submit" disabled={!ask.trim()} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2575FC] hover:bg-[#1a5fe0] text-white text-xs font-medium disabled:opacity-40 shrink-0" title={`Ctrl/⌘ + Enter · ≈ ${cost(0.02)}–${cost(0.08)}`}>
                 Change with AI
               </button>
             </form>

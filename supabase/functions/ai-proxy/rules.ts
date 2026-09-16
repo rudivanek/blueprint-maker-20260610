@@ -6,7 +6,7 @@
 export type Provider = "anthropic" | "openai" | "firecrawl";
 
 export const DEFAULT_MODELS: Record<"anthropic" | "openai", string[]> = {
-  anthropic: ["claude-sonnet-4-6"],
+  anthropic: ["claude-sonnet-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-4-6"],
   openai: ["gpt-4.1"],
 };
 
@@ -173,5 +173,3 @@ export class UsageMeter {
     return this.completed ? "ok" : "cut_off";
   }
 }
-
-

@@ -60,6 +60,7 @@ const costs = [
   { task: 'Chat reply before a change', cost: '~$0.01 per message' },
   { task: 'Change with AI (one element)', cost: '~$0.02–0.08 (10–40 seconds)' },
   { task: 'Edit on page, sync, versions, export', cost: 'Free (no AI)' },
+  { task: 'Note', cost: 'Costs above are for Claude Sonnet 4.6. Sonnet 5 costs about ⅔ of that, Opus 5 about 1.7×, Fable 5.1 about 3.3×. The app shows the estimate for the project’s model.' },
 ];
 
 const troubleshooting = [
@@ -157,7 +158,7 @@ export function HelpPage({ user, onSignOut }: HelpPageProps) {
               <section id="create" className="help-section">
                 <StepHeader num="03" title="Create a project: choose a workflow" />
                 <div className="help-body">
-                  <p>Click <strong>New Project</strong> and choose what you want to do:</p>
+                  <p>Click <strong>New Project</strong>, choose what you want to do and the <strong>AI model</strong> for the project:</p>
                   <table className="help-table">
                     <thead>
                       <tr>
@@ -327,7 +328,7 @@ export function HelpPage({ user, onSignOut }: HelpPageProps) {
               <section id="settings" className="help-section">
                 <StepHeader num="14" title="Settings, keys and usage" />
                 <div className="help-body">
-                  <p>API keys (Firecrawl, Anthropic, OpenAI) are saved on the server, never in the browser; you only see the last 4 characters. Your own key is used first, otherwise the studio key. Usage shows AI calls, scrapes, tokens and estimated cost by day, project or task, plus failed or cut-off calls. Limits: 300 calls per user per day; models Claude Sonnet 4.6 and GPT-4.1. AI Provider: Anthropic or OpenAI.</p>
+                  <p>API keys (Firecrawl, Anthropic, OpenAI) are saved on the server, never in the browser; you only see the last 4 characters. Your own key is used first, otherwise the studio key. Usage shows AI calls, scrapes, tokens and estimated cost by day, project or task, plus failed or cut-off calls. Limits: 300 calls per user per day. <strong>AI model</strong>: every project has its own — Claude Sonnet 5 (default for new projects), Claude Opus 5, Claude Fable 5.1, Claude Sonnet 4.6 or GPT-4.1. Choose it when you create a project or in the editor header; Settings sets the default for new projects. Older projects use Claude Sonnet 4.6 until you change them. Models the server doesn't allow, or without a key, are greyed out.</p>
                 </div>
               </section>
 

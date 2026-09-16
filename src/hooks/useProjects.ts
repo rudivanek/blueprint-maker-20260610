@@ -11,6 +11,8 @@ export interface NewProjectExtras {
   /** e.g. a design.md uploaded in the wizard (restyle preset) */
   design_md?: string;
   firstPage?: { name: string; slug: string; url?: string };
+  /** AI model for the project (lib/models) */
+  ai_model?: string;
 }
 
 export function useProjects(userId: string | undefined) {
@@ -41,10 +43,16 @@ export function useProjects(userId: string | undefined) {
   ): Promise<Project | null> => {
     if (!userId) return null;
     const base = { user_id: userId, name, url, globals: DEFAULT_GLOBALS, design_md: extras.design_md ?? '', screenshot_url: '' };
-    const withPreset = { ...base, preset: extras.preset ?? '', design_url: extras.design_url ?? '', brief: extras.brief ?? '' };
+    const withPreset = { ...base, preset: extras.preset ?? '', design_url: extras.design_url ?? '', brief: extras.brief ?? '', ...(extras.ai_model ? { ai_model: extras.ai_model } : {}) };
 
     let { data, error } = await supabase.from('projects').insert(withPreset).select().single();
     // If the preset migration has not been applied yet, still create the project.
+    if (error && /ai_model/i.test(error.message)) {
+      // model migration not applied yet → create without it
+      const { ai_model: _m, ...rest } = withPreset as typeof withPreset & { ai_model?: string };
+      void _m;
+      ({ data, error } = await supabase.from('projects').insert(rest).select().single());
+    }
     if (error && /preset|design_url|brief/i.test(error.message)) {
       console.warn('Preset columns missing — run the Step 4 migration. Creating project without preset.', error.message);
       ({ data, error } = await supabase.from('projects').insert(base).select().single());
@@ -72,7 +80,7 @@ export function useProjects(userId: string | undefined) {
     return data as Project;
   };
 
-  const updateProject = async (id: string, updates: Partial<Pick<Project, 'name' | 'url' | 'globals' | 'design_md' | 'screenshot_url' | 'preset' | 'design_url' | 'brief'>>) => {
+  const updateProject = async (id: string, updates: Partial<Pick<Project, 'name' | 'url' | 'globals' | 'design_md' | 'screenshot_url' | 'preset' | 'design_url' | 'brief' | 'ai_model'>>) => {
     const { error } = await supabase.from('projects').update(updates).eq('id', id);
     if (error) setError(error.message);
     else setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
@@ -138,5 +146,3 @@ export function useProject(projectId: string | undefined) {
 
   return { project, loading, error, updateGlobals, updateDesignMd, updateProject, setProject };
 }
-
-

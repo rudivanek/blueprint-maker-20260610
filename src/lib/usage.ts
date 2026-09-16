@@ -9,16 +9,17 @@
 // PRICING: edit the PRICES table below if rates change. Values are USD per
 // 1 MILLION tokens.
 
+import { MODEL_OPTIONS } from './models';
+
 export interface ModelPrice {
   inputPerMTok: number;
   outputPerMTok: number;
 }
 
 // USD per 1M tokens — adjust here if Anthropic/OpenAI change pricing.
-export const PRICES: Record<string, ModelPrice> = {
-  'claude-sonnet-4-6': { inputPerMTok: 3.0, outputPerMTok: 15.0 },
-  'gpt-4.1': { inputPerMTok: 2.0, outputPerMTok: 8.0 },
-};
+export const PRICES: Record<string, ModelPrice> = Object.fromEntries(
+  MODEL_OPTIONS.map(m => [m.id, { inputPerMTok: m.input, outputPerMTok: m.output }]),
+);
 
 const FALLBACK_PRICE: ModelPrice = { inputPerMTok: 3.0, outputPerMTok: 15.0 };
 

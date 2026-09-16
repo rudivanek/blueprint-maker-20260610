@@ -8,6 +8,7 @@
 // (ImportPanel, DesignSourcePanel, DesignPanel, SectionCard, PreviewPanel,
 // ExportPanel, CreatePanel) — no AI or data logic lives here.
 
+import { cost } from '../../lib/models';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, Lock, ArrowLeft, ArrowRight, Plus, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck } from 'lucide-react';
@@ -319,21 +320,21 @@ function ContentStep(p: StepProps & { onPendingChange: (v: boolean) => void; pen
       lead: <>The app reads the page and takes its <b>texts, images and layout</b>.{restyle ? ' The look will come from your design system, not from this site.' : ''} Check the address and click <b>Import This Page</b>. No website? Use <b>Paste my content</b> or <b>Write it for me</b>.</>,
       what: 'The page is scraped and split into sections. All text is saved word for word (copy.md), all images are listed (images.md).',
       need: 'The address of the page you want to rebuild.',
-      time: '1–3 minutes · 1 scrape + ≈ $0.20',
+      time: `1–3 minutes · 1 scrape + ≈ ${cost(0.2)}`,
     },
     paste: {
       title: 'Turn your text into page sections',
       lead: <>Paste or edit your text below and click <b>Build Sections</b>. Every <code>#</code> or <code>##</code> heading becomes a section. Your words are used exactly as written.</>,
       what: 'The AI turns your text into page sections (hero, services, contact…). Your text is saved as copy.md.',
       need: 'Your text. Markdown helps: # headings, - lists.',
-      time: 'About 30 seconds · ≈ $0.05',
+      time: `About 30 seconds · ≈ ${cost(0.05)}`,
     },
     write: {
       title: 'Let the AI write the page text',
       lead: <>Describe the page in a few sentences and click <b>Write it for me</b>. If something important is missing, the AI asks up to 4 quick questions. Then read the text, change what you like, and click <b>Build Sections</b>.</>,
       what: 'The AI writes the page copy (headings, sections, calls to action). Missing facts become [placeholders] — nothing is made up.',
       need: 'A short description: business, audience, what the page should achieve.',
-      time: '≈ 1 minute · ≈ $0.06 to write + ≈ $0.05 to build sections',
+      time: `≈ 1 minute · ≈ ${cost(0.06)} to write + ≈ ${cost(0.05)} to build sections`,
     },
   };
   const t = texts[mode];
@@ -408,7 +409,7 @@ function DesignStep(p: StepProps) {
         lead={<>The design system (<code>design.md</code>) holds the <b>colours, fonts, sizes and spacing</b>. It is made once and used for every page. {hasDesign ? 'You can replace it below.' : 'Choose where the look comes from and click Extract.'}</>}
         what="The app measures the real stylesheets of the site and writes design.md, including which Google Fonts to use."
         need="A website with the look you want — or your own design.md file."
-        time="1–2 minutes · 1 scrape + ≈ $0.15"
+        time={`1–2 minutes · 1 scrape + ≈ ${cost(0.15)}`}
       />
       <div className="px-6 py-5 space-y-4">
         {hasDesign && (
@@ -568,7 +569,7 @@ function PrototypeStep(p: StepProps) {
         lead={<>The AI builds a complete web page from the sections, the texts and the design system. Click <b>Generate HTML</b>, look at the result, ask for changes and download it.</>}
         what="A standalone .html page is written. If it gets cut off, the app continues automatically."
         need="Sections and a design system (done in the earlier steps)."
-        time="2–4 minutes · ≈ $0.30"
+        time={`2–4 minutes · ≈ ${cost(0.3)}`}
       />
       <div className="px-6 py-5">
         <div className="h-[75vh] min-h-[520px] border border-[#E5E7EB] flex flex-col overflow-hidden">

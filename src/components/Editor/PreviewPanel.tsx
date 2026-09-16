@@ -22,6 +22,7 @@
 // - Download as standalone .html / copy to clipboard
 // - Generated HTML persists per page via onHtmlSaved (Supabase pages.generated_html)
 
+import { cost } from '../../lib/models';
 import { useState, useRef, useEffect } from 'react';
 import {
   Wand2, Loader2, AlertCircle, Download, Copy, Check, Columns2,
@@ -546,7 +547,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (!hasKey || !hasSections) return;
     const n = changesRef.current.length;
     if (!isRegenerate && htmlRef.current &&
-        !window.confirm(`Generate Fresh builds a completely new prototype from the sections, the design${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'} (the AI rebuilds them, so details can look different)` : ''}. The current prototype is saved under Versions, so you can restore it. 2–4 minutes, ≈ $0.30. Continue?`)) return;
+        !window.confirm(`Generate Fresh builds a completely new prototype from the sections, the design${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'} (the AI rebuilds them, so details can look different)` : ''}. The current prototype is saved under Versions, so you can restore it. 2–4 minutes, ≈ ${cost(0.3)}. Continue?`)) return;
     if (editMode) stopEditing();
     snapshot(opts.versionLabel ?? (isRegenerate ? `Before: ${short(label || plan || 'Describe changes')}` : 'Before Generate Fresh'));
     const jobId = jobStore.start({
@@ -577,7 +578,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   // Outdated prototype → rebuild it for the current sections / design, keeping its changes
   const runUpdate = () => {
     const n = changesRef.current.length;
-    if (!window.confirm(`Update the prototype to the current content and design? Its layout, widgets${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'}` : ''} are kept. The current version is saved under Versions. 2–4 minutes, ≈ $0.30.`)) return;
+    if (!window.confirm(`Update the prototype to the current content and design? Its layout, widgets${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'}` : ''} are kept. The current version is saved under Versions. 2–4 minutes, ≈ ${cost(0.3)}.`)) return;
     void runGenerate(true, UPDATE_REQUEST, '', '', { record: false, title: 'Updating the prototype to the current content…', versionLabel: 'Before Update prototype' });
   };
 
@@ -779,7 +780,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
                 onClick={runUpdate}
                 disabled={!hasKey || !hasSections}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium shrink-0 disabled:opacity-40"
-                title="2–4 minutes · ≈ $0.30"
+                title={`2–4 minutes · ≈ ${cost(0.3)}`}
               >
                 <RefreshCw className="w-3.5 h-3.5" /> Update prototype, keep my changes
               </button>
@@ -874,7 +875,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         )}
         {html && !editMode && chat?.mode === 'page' && (
           <ChangeChat
-            title="Before the page is rebuilt (2–4 minutes, ≈ $0.30)"
+            title={`Before the page is rebuilt (2–4 minutes, ≈ ${cost(0.3)})`}
             messages={chat.messages}
             turn={chat.turn}
             busy={chat.busy || isBusy}

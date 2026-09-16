@@ -205,6 +205,8 @@ export interface Project {
   design_url?: string;
   /** The user's own page description (describe) or written content (content) */
   brief?: string;
+  /** AI model for this project (lib/models); '' = older project → Claude Sonnet 4.6 */
+  ai_model?: string;
   created_at: string;
   updated_at: string;
   pages?: Page[];
@@ -224,6 +226,8 @@ export interface AppSettings {
   anthropicApiKey: string;
   openaiApiKey: string;
   aiProvider: AIProvider;
+  /** Model for new projects (lib/models) */
+  defaultModel?: string;
   defaultImageInstructions: string;
 }
 

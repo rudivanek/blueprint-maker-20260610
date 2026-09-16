@@ -16,6 +16,9 @@ import { loadSettings, saveSettings } from './settings';
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`;
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+import { getActiveModel } from './models';
+
+/** Kept for older imports; the real model comes from the open project (lib/models). */
 export const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 export const OPENAI_MODEL = 'gpt-4.1';
 
@@ -250,7 +253,7 @@ interface CallOpts {
 }
 
 export async function anthropicCall(body: Record<string, unknown>, opts: CallOpts): Promise<AIResult> {
-  const resp = await post({ action: 'call', provider: 'anthropic', body: { model: ANTHROPIC_MODEL, ...body }, purpose: opts.purpose, projectId: currentProjectId }, opts.signal);
+  const resp = await post({ action: 'call', provider: 'anthropic', body: { model: getActiveModel('anthropic'), ...body }, purpose: opts.purpose, projectId: currentProjectId }, opts.signal);
   if (!resp.ok || !resp.body) throw await errorFrom(resp);
 
   let text = '';
@@ -259,7 +262,7 @@ export async function anthropicCall(body: Record<string, unknown>, opts: CallOpt
   let streamError = '';
   const toolJson: Record<number, string> = {};
   const toolIdx: number[] = [];
-  const callId = usageStore.startCall(ANTHROPIC_MODEL);
+  const callId = usageStore.startCall(getActiveModel('anthropic'));
   let input = 0;
   let output = 0;
 
@@ -312,14 +315,14 @@ export async function anthropicCall(body: Record<string, unknown>, opts: CallOpt
 // ---------------------------------------------------------------------------
 
 export async function openaiCall(body: Record<string, unknown>, opts: CallOpts): Promise<AIResult> {
-  const resp = await post({ action: 'call', provider: 'openai', body: { model: OPENAI_MODEL, ...body }, purpose: opts.purpose, projectId: currentProjectId }, opts.signal);
+  const resp = await post({ action: 'call', provider: 'openai', body: { model: getActiveModel('openai'), ...body }, purpose: opts.purpose, projectId: currentProjectId }, opts.signal);
   if (!resp.ok || !resp.body) throw await errorFrom(resp);
 
   let text = '';
   let finish = '';
   let done = false;
   let streamError = '';
-  const callId = usageStore.startCall(OPENAI_MODEL);
+  const callId = usageStore.startCall(getActiveModel('openai'));
   let input = 0;
   let output = 0;
 
@@ -412,4 +415,3 @@ export async function firecrawlScrape<T = unknown>(body: Record<string, unknown>
   usageStore.reportScrape();
   return data;
 }
-

@@ -6,6 +6,7 @@
 //   so the user can edit it and click Build Sections.
 // The description and answers are remembered per page in this browser.
 
+import { cost } from '../../lib/models';
 import { useEffect, useState } from 'react';
 import { Sparkles, AlertCircle, Check, SkipForward } from 'lucide-react';
 import { checkBrief, writeCopy, type CopyAnswers, type CopyBrief, type CopyQuestion } from '../../lib/copywriter';
@@ -159,7 +160,7 @@ export function CopyWriter({ pageId, provider, hasAIKey, initialDescription = ''
       )}
       {!asked && (
         <p className="text-[10px] text-[#9CA3AF]">
-          The AI first checks your description and may ask up to 4 quick questions. Missing facts (phone, address, prices) become [placeholders] — nothing is made up. About $0.01 + $0.05.
+          The AI first checks your description and may ask up to 4 quick questions. Missing facts (phone, address, prices) become [placeholders] — nothing is made up. About {cost(0.01)} + {cost(0.05)}.
         </p>
       )}
 
