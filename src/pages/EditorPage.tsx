@@ -17,6 +17,7 @@ import { ExportPanel } from '../components/Export/ExportPanel';
 import { PreviewPanel } from '../components/Editor/PreviewPanel';
 import { PresetGuide } from '../components/Editor/PresetGuide';
 import { ProcessingOverlay } from '../components/ui/ProcessingOverlay';
+import { GuidedEditor } from '../components/Editor/GuidedEditor';
 import { getPreset, type GuideStepId } from '../lib/presets';
 import { loadSettings } from '../lib/settings';
 import { setUsageProject } from '../lib/aiProxy';
@@ -55,6 +56,19 @@ export function EditorPage({ user }: EditorPageProps) {
   const [renameValue, setRenameValue] = useState('');
   const [showCustomInstructions, setShowCustomInstructions] = useState(false);
   const [showScreenshotPanel, setShowScreenshotPanel] = useState(false);
+
+  // Guided (wizard) or Advanced (full editor). Remembered per project in this browser.
+  const modeKey = `bpm_mode_${projectId}`;
+  const [savedMode, setSavedMode] = useState<'guided' | 'advanced' | null>(() => {
+    try {
+      const v = localStorage.getItem(modeKey);
+      return v === 'guided' || v === 'advanced' ? v : null;
+    } catch { return null; }
+  });
+  const switchMode = (m: 'guided' | 'advanced') => {
+    setSavedMode(m);
+    try { localStorage.setItem(modeKey, m); } catch { /* ignore */ }
+  };
 
   // Per-page screenshots: map of pageId → screenshot data string
   const [screenshotMap, setScreenshotMap] = useState<Record<string, string>>({});
@@ -287,6 +301,9 @@ export function EditorPage({ user }: EditorPageProps) {
   const allSectionsMap: Record<string, Section[]> = { ...allSectionsRef.current };
   allSectionsMap[activePageId || ''] = sections;
 
+  // Default: Guided for projects created with a workflow, Advanced for older/manual ones.
+  const guided = (savedMode ?? (project.preset && project.preset !== 'manual' ? 'guided' : 'advanced')) === 'guided';
+
   const panelButtons: { id: ActivePanel; icon: typeof Layers; label: string }[] = [
     { id: 'sections', icon: Layers, label: 'Sections' },
     { id: 'design', icon: FileText, label: 'Design' },
@@ -302,6 +319,17 @@ export function EditorPage({ user }: EditorPageProps) {
         breadcrumbs={[{ label: 'Projects', href: '/' }, { label: project.name }]}
         rightSlot={
           <div className="flex items-center gap-2">
+            <div className="flex border border-[#E5E7EB] text-xs" title="Guided = step by step · Advanced = the full editor">
+              {(['guided', 'advanced'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => switchMode(m)}
+                  className={`px-3 py-1.5 transition-colors ${(m === 'guided') === guided ? 'bg-[#2575FC] text-white' : 'bg-white text-[#6B7280] hover:text-[#111827]'}`}
+                >
+                  {m === 'guided' ? 'Guided' : 'Advanced'}
+                </button>
+              ))}
+            </div>
             {savedIndicator && (
               <span className="flex items-center gap-1 text-xs text-green-600 animate-fade-in">
                 <Check className="w-3 h-3" /> Saved
@@ -312,7 +340,8 @@ export function EditorPage({ user }: EditorPageProps) {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar */}
+        {/* Left sidebar (Advanced mode only) */}
+        {!guided && (
         <div className="w-64 bg-[#F9FAFB] border-r border-[#E5E7EB] flex flex-col shrink-0 overflow-hidden">
           {/* Panel tabs */}
           <div className="flex border-b border-[#E5E7EB] px-2 pt-2">
@@ -403,6 +432,7 @@ export function EditorPage({ user }: EditorPageProps) {
             )}
           </div>
         </div>
+        )}
 
         {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -497,8 +527,39 @@ export function EditorPage({ user }: EditorPageProps) {
             )}
           </div>
 
-          {/* Preview mode replaces the sections list */}
-          {activePanel === 'preview' && activePage ? (
+          {/* Guided mode: the step-by-step wizard */}
+          {guided ? (
+            <div className="flex-1 overflow-auto" id="bpm-guided-scroll">
+              {activePage ? (
+                <GuidedEditor
+                  project={project}
+                  page={activePage}
+                  pages={pages}
+                  sections={sections}
+                  allSections={allSectionsMap}
+                  screenshotMap={screenshotMap}
+                  appSettings={appSettings}
+                  onStructureImported={handleStructureImported}
+                  onPageUrlChange={handlePageUrlChange}
+                  onDesignGenerated={handleDesignGenerated}
+                  onDesignMdChange={handleDesignMdUpdate}
+                  onHtmlSaved={handleGeneratedHtmlSaved}
+                  onSectionUpdate={handleSectionUpdate}
+                  onSectionDelete={id => deleteSection(id)}
+                  onAddSection={() => setShowTemplateModal(true)}
+                  onPageUpdate={updates => { updatePage(activePage.id, updates); triggerSaved(); }}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center py-24">
+                  <Layers className="w-8 h-8 text-[#E5E7EB] mb-3" />
+                  <p className="text-[#9CA3AF] text-sm mb-4">Add a page to start.</p>
+                  <button onClick={() => setShowAddPage(true)} className="flex items-center gap-2 text-[#2575FC] text-sm hover:underline">
+                    <Plus className="w-4 h-4" /> Add First Page
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : activePanel === 'preview' && activePage ? (
             <div className="flex-1 overflow-hidden">
               <PreviewPanel
                 key={activePage.id}
