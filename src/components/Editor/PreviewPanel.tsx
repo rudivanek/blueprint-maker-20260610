@@ -47,6 +47,7 @@ import { cleanNewText, fieldForEdit, getField, planDelete, renumberMarks, replac
 import { addChange, describeDelete, describeEdit, readChanges } from '../../lib/changeLog';
 import { loadVersion, saveVersion, type VersionInfo } from '../../lib/versions';
 import { VersionsMenu } from './VersionsMenu';
+import { usePreviewHeight } from '../../hooks/usePreviewHeight';
 import type { GlobalSettings, Page, PrototypeChange, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -80,6 +81,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const [feedback, setFeedback] = useState('');
   const [compare, setCompare] = useState(false);
   const [viewport, setViewport] = useState<Viewport>('desktop');
+  const preview = usePreviewHeight();
   const [copied, setCopied] = useState(false);
   const [localStatus, setLocalStatus] = useState('');
   // Chat with the AI about the current change (null = none open)
@@ -671,9 +673,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     : '';
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       {/* Toolbar */}
-      <div className="border-b border-[#E5E7EB] bg-white px-4 py-3 shrink-0 space-y-2.5 max-h-[55%] overflow-y-auto">
+      <div className="border-b border-[#E5E7EB] bg-white px-4 py-3 shrink-0 space-y-2.5">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => runGenerate(false)}
@@ -914,8 +916,11 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         )}
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 overflow-hidden bg-[#F0F1F3]">
+      {/* Canvas — its height is set by the user (drag handle below) */}
+      <div
+        className={`overflow-hidden bg-[#F0F1F3] shrink-0 ${preview.resizing ? 'pointer-events-none select-none' : ''}`}
+        style={{ height: preview.height }}
+      >
         {!html ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
             <div className="w-12 h-12 border border-[#E5E7EB] bg-white flex items-center justify-center mb-4">
@@ -955,6 +960,19 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             />
           </div>
         )}
+      </div>
+      {/* Resize handle: drag to change the preview height, double-click = default */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize preview"
+        aria-valuenow={preview.height}
+        tabIndex={0}
+        title="Drag to change the preview height · double-click to reset"
+        {...preview.handleProps}
+        className={`group h-3 shrink-0 flex items-center justify-center cursor-row-resize touch-none border-t border-[#E5E7EB] focus:outline-none ${preview.resizing ? 'bg-[#2575FC]/15' : 'bg-white hover:bg-[#F3F4F6] focus:bg-[#F3F4F6]'}`}
+      >
+        <span className={`block h-1 w-12 rounded-full ${preview.resizing ? 'bg-[#2575FC]' : 'bg-[#D1D5DB] group-hover:bg-[#9CA3AF]'}`} />
       </div>
     </div>
   );

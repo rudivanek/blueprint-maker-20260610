@@ -257,6 +257,7 @@ export function HelpPage({ user, onSignOut }: HelpPageProps) {
                     <li><strong>Edit on page</strong>: click elements to edit or change them (chapter 10).</li>
                     <li><strong>Versions</strong>, <strong>Undo</strong>, <strong>Recorded changes</strong>: see chapter 11.</li>
                     <li><strong>Compare</strong> (with the screenshot), desktop / tablet / mobile widths, <strong>Copy</strong> and <strong>Download .html</strong>.</li>
+                    <li><strong>Preview height</strong>: drag the bar under the preview to make it taller or shorter (or focus it and use the arrow keys). The height is remembered; double-click the bar to reset it.</li>
                     <li><strong>Generate Fresh</strong> builds a completely new prototype (asks first; the current one is saved under Versions).</li>
                   </ul>
                 </div>

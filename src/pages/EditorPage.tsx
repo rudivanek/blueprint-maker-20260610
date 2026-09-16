@@ -607,7 +607,7 @@ export function EditorPage({ user }: EditorPageProps) {
               )}
             </div>
           ) : activePanel === 'preview' && activePage ? (
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-y-auto">
               <PreviewPanel
                 key={activePage.id}
                 designMd={project.design_md}

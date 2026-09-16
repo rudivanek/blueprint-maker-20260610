@@ -572,7 +572,7 @@ function PrototypeStep(p: StepProps) {
         time={`2–4 minutes · ≈ ${cost(0.3)}`}
       />
       <div className="px-6 py-5">
-        <div className="h-[75vh] min-h-[520px] border border-[#E5E7EB] flex flex-col overflow-hidden">
+        <div className="border border-[#E5E7EB] flex flex-col">
           <PreviewPanel
             key={p.page.id}
             designMd={p.project.design_md}
