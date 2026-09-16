@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Project, Page, Section } from '../types';
 import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
 import { checkFabrication, factCheckMd } from '../lib/pageAssets';
+import { changesMd, cleanPrototypeHtml, readChanges } from '../lib/changeLog';
 
 async function screenshotToBase64(data: string): Promise<string> {
   if (data.startsWith('data:')) return data.split(',')[1];
@@ -62,6 +63,10 @@ export function useExport() {
         }
         if (page.images_md) zip.file(`images${suffix}.md`, page.images_md);
 
+        // The approved prototype (with all later changes) + the change list
+        if (page.generated_html) zip.file(`prototype${suffix}.html`, cleanPrototypeHtml(page.generated_html));
+        if (page.generated_html || readChanges(page).length) zip.file(`changes${suffix}.md`, changesMd(page, sections));
+
         const screenshotData = activeScreenshotMap[page.id];
         if (screenshotData) {
           const base64 = await screenshotToBase64(screenshotData);
@@ -97,6 +102,11 @@ ${pages.some(p => p.images_md)
       ? pages.filter(p => p.images_md).map(p => `- images-${p.slug}.md — ${p.page_name}: real image URLs by section`).join('\n')
       : '- images.md — Real image URLs, grouped by section')
   : ''}
+${pages.some(p => p.generated_html)
+  ? (multiPage
+      ? pages.filter(p => p.generated_html).map(p => `- prototype-${p.slug}.html — ${p.page_name}: the approved prototype (open in a browser)\n- changes-${p.slug}.md — ${p.page_name}: changes approved on the prototype`).join('\n')
+      : '- prototype.html — The approved prototype, including all later changes (open in a browser)\n- changes.md — Changes approved on the prototype (keep them)')
+  : ''}
 ${screenshotPages.length > 0
   ? (multiPage
       ? screenshotPages.map(p => `- screenshot-${p.slug}.jpg — ${p.page_name} visual reference`).join('\n')
@@ -106,7 +116,7 @@ ${screenshotPages.length > 0
 ## How to Use
 1. Open your AI tool of choice
 2. Copy the contents of prompt.txt as your opening message
-3. Attach design.md, the blueprint.md file(s) and — if present — copy.md and images.md
+3. Attach design.md, the blueprint.md file(s) and — if present — copy.md, images.md, prototype.html and changes.md
 ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual reference\n5. Hit send and review the output' : '4. Hit send and review the output'}
 `;
       zip.file('README.txt', readme);

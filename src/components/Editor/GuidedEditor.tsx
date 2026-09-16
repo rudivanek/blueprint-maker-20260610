@@ -588,7 +588,7 @@ function ExportStep(p: StepProps) {
             <li>Attach <b>design.md</b>, the blueprint, <b>copy.md</b> and <b>images.md</b> (and the screenshot if included).</li>
             <li>For more pages: "Add this page using the same design system and components" + that page's files.</li>
           </ol>
-          <p className="text-xs text-[#6B7280] mt-3">The prototype you generated is saved with the page; download it from the Prototype step.</p>
+          <p className="text-xs text-[#6B7280] mt-3">The ZIP also contains <b>prototype.html</b> (with all your changes) and <b>changes.md</b>, so the AI builder rebuilds exactly what you approved.</p>
         </div>
       </div>
     </>

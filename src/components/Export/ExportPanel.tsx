@@ -89,7 +89,7 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
         </label>
 
         <p className="text-[#9CA3AF] text-[10px] text-center mt-2">
-          prompt.txt + design.md + blueprint.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
+          prompt.txt + design.md + blueprint.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{pages.some(p => p.generated_html) ? ' + prototype.html + changes.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
         </p>
       </div>
 

@@ -1,3 +1,5 @@
+// src/types/index.ts
+
 export interface NavItem {
   label: string;
   url: string;
@@ -144,6 +146,25 @@ export interface Section {
   updated_at: string;
 }
 
+export interface PrototypeChange {
+  id: string;
+  /** ISO date */
+  at: string;
+  /** ai-page = Describe changes · ai-element = Change with AI · edit = manual edit on the page */
+  kind: 'ai-page' | 'ai-element' | 'edit';
+  sectionId?: string;
+  /** e.g. <div> "Our gallery" */
+  target?: string;
+  /** what the user asked for / what changed */
+  request: string;
+  /** the plan the AI and the user agreed on */
+  plan?: string;
+  /** manual text edits: old and new text (used to merge repeated edits) */
+  what?: string;
+  from?: string;
+  to?: string;
+}
+
 export interface Page {
   id: string;
   project_id: string;
@@ -163,6 +184,8 @@ export interface Page {
   copy_md?: string;
   /** Real image URLs captured at import (no AI) */
   images_md?: string;
+  /** Changes approved on the prototype that aren't part of the sections (lib/changeLog) */
+  prototype_changes?: PrototypeChange[];
   created_at: string;
   updated_at: string;
   sections?: Section[];
@@ -354,4 +377,3 @@ export const SECTION_TEMPLATES: Record<string, Partial<Section>> = {
     ],
   },
 };
-

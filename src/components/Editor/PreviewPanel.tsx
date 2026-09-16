@@ -8,6 +8,8 @@
 //   it; Undo (lib/visualEdit + VisualEditBar)
 // - Text / image / link edits on the page are written back into the sections
 //   and copy.md (lib/prototypeSync), so all steps and the export stay in sync
+// - Everything else that changes the prototype (AI changes, deleted elements,
+//   edits outside the sections) goes into the page's change list (lib/changeLog)
 // - "Describe changes" and "Change with AI": a short chat first (lib/changeChat +
 //   ChangeChat) — the AI says what it will do, warns, asks up to 4 questions;
 //   nothing changes until "Yes, do it" (optional: skip for clear requests)
@@ -21,7 +23,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Wand2, Loader2, AlertCircle, Download, Copy, Check, Columns2,
-  Monitor, Tablet, Smartphone, RefreshCw, XCircle, MousePointerClick, Undo2,
+  Monitor, Tablet, Smartphone, RefreshCw, XCircle, MousePointerClick, Undo2, ListChecks, X,
 } from 'lucide-react';
 import { useGenerateHtml } from '../../hooks/useGenerateHtml';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
@@ -39,7 +41,8 @@ import {
   type EditOp, type Selection,
 } from '../../lib/visualEdit';
 import { cleanNewText, fieldForEdit, getField, replaceInCopyMd, setField, norm, type FieldKind } from '../../lib/prototypeSync';
-import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
+import { addChange, describeDelete, describeEdit, readChanges } from '../../lib/changeLog';
+import type { GlobalSettings, Page, PrototypeChange, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
   designMd: string;
@@ -178,9 +181,31 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     return true;
   };
 
+  // ── Change list (pages.prototype_changes) ──
+  const [changes, setChanges] = useState<PrototypeChange[]>(() => readChanges(page));
+  const changesRef = useRef(changes);
+  useEffect(() => {
+    const list = readChanges(page);
+    changesRef.current = list;
+    setChanges(list);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page.prototype_changes]);
+  const saveChanges = (list: PrototypeChange[]) => {
+    changesRef.current = list;
+    setChanges(list);
+    onPageUpdate?.({ prototype_changes: list });
+  };
+  const recordChange = (entry: Omit<PrototypeChange, 'id' | 'at'>) => {
+    if (!onPageUpdate) return;
+    saveChanges(addChange(changesRef.current, entry));
+  };
+
   /** Undo: put the sections / copy.md back the way they were before the edit */
+  const restoreChanges = (entry: HistoryEntry) => {
+    if (entry.changes && JSON.stringify(entry.changes) !== JSON.stringify(changesRef.current)) saveChanges(entry.changes);
+  };
   const restoreSections = (entry: HistoryEntry) => {
-    if (!entry.sections || !onSectionSync) return;
+    if (!entry.sections || !onSectionSync) { restoreChanges(entry); return; }
     const cur = sectionsRef.current;
     for (const old of entry.sections) {
       const now = cur.find(s => s.id === old.id);
@@ -189,6 +214,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       if (pick(now) !== pick(old)) onSectionSync(old.id, { copy: old.copy, items: old.items, images: old.images });
     }
     sectionsRef.current = cur.map(s => entry.sections!.find(o => o.id === s.id) ?? s);
+    restoreChanges(entry);
     if (entry.copyMd !== undefined && entry.copyMd !== copyMdRef.current) {
       copyMdRef.current = entry.copyMd;
       onPageUpdate?.({ copy_md: entry.copyMd });
@@ -230,13 +256,24 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     const beforeSections = sectionsRef.current;
     const beforeCopyMd = copyMdRef.current;
     const wasCurrent = !isPreviewOutdated(prev, previewSource(designMd, globals, beforeSections));
+    const beforeChanges = changesRef.current;
     const targets = syncTargets(doc, op);
+    const before = describeElement(doc, op.key);
     if (!applyEdit(doc, op)) return;
     let next = savedHtml(doc, prev);
     const synced = syncBack(targets, op);
     // the prototype already shows the change → keep it "current" for the updated sections
     if (synced && wasCurrent) next = stampHtml(next, previewSource(designMd, globals, sectionsRef.current));
-    pushHistory(synced ? { html: prev, sections: beforeSections, copyMd: beforeCopyMd } : { html: prev });
+    pushHistory({ html: prev, changes: beforeChanges, ...(synced ? { sections: beforeSections, copyMd: beforeCopyMd } : {}) });
+    // not part of the sections → remember it in the change list
+    if (!synced && before && op.type !== 'replace') {
+      const after = describeElement(doc, op.key);
+      const base = { kind: 'edit' as const, sectionId: before.sectionId, target: before.label };
+      if (op.type === 'delete') recordChange({ ...base, request: describeDelete(before.label) });
+      else if (op.type === 'text' && after) recordChange({ ...base, request: describeEdit('Text', before.text, after.text), what: 'Text', from: before.text, to: after.text });
+      else if (op.type === 'image' && after) recordChange({ ...base, request: describeEdit('Image', before.src, after.src) });
+      else if (op.type === 'link' && after) recordChange({ ...base, request: describeEdit('Link', `${before.text} (${before.href})`, `${after.text} (${after.href})`) });
+    }
     htmlRef.current = next;
     setHtml(next);
     scheduleSave(next);
@@ -283,7 +320,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     const plan = [...state.messages].reverse().find(m => m.role === 'ai')?.text ?? '';
     const first = state.messages.find(m => m.role === 'user')?.text ?? '';
     if (state.mode === 'page') void runGenerate(true, request, plan, first);
-    else if (state.key) void runElementChange(state.key, request, plan);
+    else if (state.key) void runElementChange(state.key, request, plan, { label: state.label ?? '', first });
   };
 
   // Selecting the surrounding element (e.g. after "click Parent") keeps the chat going.
@@ -311,7 +348,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection?.key]);
 
-  const runElementChange = async (key: string, request: string, plan = '') => {
+  const runElementChange = async (key: string, request: string, plan = '', meta?: { label: string; first: string }) => {
     const doc = docRef.current;
     if (!doc) return;
     const current = elementHtml(doc, key);
@@ -333,11 +370,13 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       );
       if (jobStore.isCancelled(jobId)) return;
       const before = htmlRef.current;
+      const target = describeElement(doc, key);
       commitEdit({ type: 'replace', key, ...change }, false);
       if (htmlRef.current === before) {
         toast('The AI answer could not be used — please try again or rephrase.', 'error');
         return;
       }
+      recordChange({ kind: 'ai-element', sectionId: target?.sectionId, target: meta?.label || target?.label, request: meta?.first || request, plan });
       closeChat();
       loadIntoEditor(htmlRef.current); // reload so new scripts run
       ding();
@@ -421,8 +460,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
 
   const runGenerate = async (isRegenerate: boolean, request = '', plan = '', label = '') => {
     if (!hasKey || !hasSections) return;
-    if (!isRegenerate && hasManualEdits(htmlRef.current) &&
-        !window.confirm('Generate Fresh builds a new prototype from the sections and discards the edits you made on the page. (You can Undo afterwards.) Continue?')) return;
+    const n = changesRef.current.length;
+    if (!isRegenerate && (hasManualEdits(htmlRef.current) || n > 0) &&
+        !window.confirm(`Generate Fresh builds a new prototype from the sections, the design${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'} — the AI rebuilds them, so details can look a little different` : ''}. The current prototype is replaced (you can Undo afterwards). Continue?`)) return;
     if (editMode) stopEditing();
     const jobId = jobStore.start({
       kind: 'generate',
@@ -435,7 +475,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (jobId === null) return;
     jobRef.current = jobId;
     try {
-      await generateNow(isRegenerate, jobId, request, label);
+      await generateNow(isRegenerate, jobId, request, label, plan);
     } finally {
       jobStore.finish(jobId);
       jobRef.current = null;
@@ -449,7 +489,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     void runTurn({ mode: 'page', messages: [], turn: null, busy: false }, [{ role: 'user', text: request }]);
   };
 
-  const generateNow = async (isRegenerate: boolean, jobId: number, request: string, label = '') => {
+  const generateNow = async (isRegenerate: boolean, jobId: number, request: string, label = '', plan = '') => {
     // Prepare screenshot slices as visual reference (best effort)
     let slices: string[] = [];
     if (screenshot) {
@@ -472,7 +512,8 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (result && !jobStore.isCancelled(jobId)) {
       const keepMarker = isRegenerate && hasManualEdits(htmlRef.current);
       const stamped = stampHtml(result.html, source) + (keepMarker ? `${EDITED_MARKER}\n` : '');
-      if (htmlRef.current) pushHistory({ html: htmlRef.current });
+      if (htmlRef.current) pushHistory({ html: htmlRef.current, changes: changesRef.current });
+      if (isRegenerate) recordChange({ kind: 'ai-page', request: (label || request).trim(), plan });
       htmlRef.current = stamped;
       setHtml(stamped);
       onHtmlSaved(page.id, stamped);
@@ -650,6 +691,35 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         )}
 
         {/* Feedback / regenerate row */}
+        {html && !editMode && changes.length > 0 && (
+          <details className="border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-1.5 text-xs">
+            <summary className="cursor-pointer text-[#374151] flex items-center gap-1.5 select-none">
+              <ListChecks className="w-3.5 h-3.5 text-[#2575FC]" />
+              <b>Recorded changes ({changes.length})</b>
+              <span className="text-[#9CA3AF]">— kept when the prototype is rebuilt, and included in the export</span>
+            </summary>
+            <ul className="mt-1.5 mb-1 space-y-1 max-h-40 overflow-y-auto">
+              {changes.map(c => (
+                <li key={c.id} className="flex items-start gap-2 text-[#374151]">
+                  <span className="shrink-0 text-[10px] px-1 py-0.5 bg-white border border-[#E5E7EB] text-[#6B7280]">
+                    {c.kind === 'ai-page' ? 'AI · page' : c.kind === 'ai-element' ? 'AI · element' : 'Edit'}
+                  </span>
+                  <span className="flex-1 min-w-0" title={c.plan || c.request}>
+                    {c.target && <span className="text-[#6B7280]">{c.target}: </span>}{c.request}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => saveChanges(changesRef.current.filter(x => x.id !== c.id))}
+                    title="Remove from the list (the prototype itself doesn't change)"
+                    className="p-0.5 text-[#9CA3AF] hover:text-red-500 shrink-0"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
         {html && !editMode && lastRequest && !chat && (
           <p className="text-[11px] text-[#6B7280] truncate" title={lastRequest}>
             <span className="font-medium text-[#374151]">Last change applied:</span> {lastRequest}
@@ -780,6 +850,8 @@ function selectionLabel(sel: Selection): string {
 
 interface HistoryEntry {
   html: string;
+  /** change list before this step (Undo restores it) */
+  changes?: PrototypeChange[];
   /** sections before a synced edit (Undo restores them) */
   sections?: Section[];
   copyMd?: string;
@@ -790,4 +862,23 @@ interface SyncTarget {
   old: string;
   el: Element;
   ref: NonNullable<ReturnType<typeof fieldForEdit>>;
+}
+
+/** What an element is (for the change list), read from the keyed document. */
+function describeElement(doc: Document, key: string): { label: string; sectionId?: string; text: string; src: string; href: string } | null {
+  const el = doc.querySelector(`[data-bpm-k="${CSS.escape(key)}"]`);
+  if (!el) return null;
+  const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const src = el.tagName === 'IMG'
+    ? el.getAttribute('src') ?? ''
+    : ((el.getAttribute('style') ?? '').match(/url\((['"]?)([^'")]*)\1\)/i)?.[2] ?? '');
+  const alt = el.getAttribute('alt') ?? '';
+  const shown = text || alt;
+  return {
+    label: `<${el.tagName.toLowerCase()}>${shown ? ` "${shown.slice(0, 40)}${shown.length > 40 ? '…' : ''}"` : ''}`,
+    sectionId: el.closest('[data-bpm-s]')?.getAttribute('data-bpm-s') ?? undefined,
+    text,
+    src,
+    href: el.getAttribute('href') ?? '',
+  };
 }

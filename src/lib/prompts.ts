@@ -1,4 +1,5 @@
 import type { GlobalSettings, Page, Section } from '../types';
+import { changesBlueprintBlock } from './changeLog';
 
 export const DESIGN_SYSTEM_EXTRACTION_PROMPT = `You are a precision design system analyst. You will receive:
 1. Branding/extract data from a website (colors, fonts, brand name, logo)
@@ -606,7 +607,9 @@ The layout_contract fields mean:
 1. **design.md** — design tokens: colors, fonts, spacing. Use CSS variables. Never hardcode values.
 2. **blueprint.md** — page structure. Section order is exact.
 - **copy.md** (if attached) — the exact text of the original page, captured without AI. When blueprint copy and copy.md disagree, copy.md wins. Never invent numbers, testimonials, client names or claims.
-- **images.md** (if attached) — real image URLs grouped by section. Use them in those sections.${hasScreenshots ? '\n3. **screenshot.jpg** — visual reference. Highest authority on layout intent. Use it to verify column counts and image positions.' : ''}
+- **images.md** (if attached) — real image URLs grouped by section. Use them in those sections.
+- **prototype.html** (if attached) — the prototype the client approved, including later changes. Match its look, content and working widgets.
+- **changes.md** (if attached) — changes approved after the blueprint was written. Keep all of them.${hasScreenshots ? '\n3. **screenshot.jpg** — visual reference. Highest authority on layout intent. Use it to verify column counts and image positions.' : ''}
 
 ## BUILD PROCESS
 For each section:
@@ -732,6 +735,6 @@ ${pageCustomInstructions ?? page.custom_instructions}
 
 ` : ''}---
 
-${sectionsContent}`;
+${sectionsContent}${changesBlueprintBlock(page, sections)}`;
 }
 
