@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Globe, Clock, Trash2, Loader2, FolderOpen, ArrowRight, ArrowLeft, Upload, CheckCircle, X } from 'lucide-react';
+import { Plus, Globe, Clock, Trash2, Loader2, FolderOpen, ArrowRight, ArrowLeft, Upload, CheckCircle, X, Copy } from 'lucide-react';
 import { useProjects } from '../hooks/useProjects';
 import { PRESETS, getPreset } from '../lib/presets';
 import type { ProjectPreset } from '../types';
@@ -12,7 +12,8 @@ interface ProjectsPageProps {
 
 export function ProjectsPage({ user }: ProjectsPageProps) {
   const navigate = useNavigate();
-  const { projects, loading, createProject, deleteProject } = useProjects(user.id);
+  const { projects, loading, error: projectsError, createProject, deleteProject, duplicateProject } = useProjects(user.id);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [preset, setPreset] = useState<ProjectPreset | null>(null);
   const [newName, setNewName] = useState('');
@@ -86,6 +87,14 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
     setDeletingId(null);
   };
 
+  const handleDuplicate = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (duplicatingId) return;
+    setDuplicatingId(id);
+    await duplicateProject(id);
+    setDuplicatingId(null);
+  };
+
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     const now = new Date();
@@ -114,6 +123,10 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
             New Project
           </button>
         </div>
+
+        {projectsError && (
+          <div className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{projectsError}</div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-24">
@@ -174,6 +187,14 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
                           </p>
                         )}
                       </div>
+                      <button
+                        onClick={e => handleDuplicate(e, project.id)}
+                        disabled={duplicatingId !== null}
+                        title="Duplicate project"
+                        className={`${duplicatingId === project.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} w-6 h-6 flex items-center justify-center text-[#9CA3AF] hover:text-[#2575FC] hover:bg-[#EFF5FF] transition-all shrink-0`}
+                      >
+                        {duplicatingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
                       <button
                         onClick={e => handleDelete(e, project.id)}
                         disabled={deletingId === project.id}

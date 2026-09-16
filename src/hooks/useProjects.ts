@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Project, GlobalSettings, ProjectPreset } from '../types';
 import { DEFAULT_GLOBALS } from '../types';
+import { duplicateProject as duplicateProjectRows } from '../lib/duplicateProject';
 
 export interface NewProjectExtras {
   preset?: ProjectPreset;
@@ -83,7 +84,20 @@ export function useProjects(userId: string | undefined) {
     else setProjects(prev => prev.filter(p => p.id !== id));
   };
 
-  return { projects, loading, error, createProject, updateProject, deleteProject, refetch: fetchProjects };
+  /** Copies a project with all pages and sections. Returns the new id, or null on error. */
+  const duplicateProject = async (id: string): Promise<string | null> => {
+    if (!userId) return null;
+    try {
+      const newId = await duplicateProjectRows(supabase, id, userId, projects.map(p => p.name));
+      await fetchProjects();
+      return newId;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  };
+
+  return { projects, loading, error, createProject, updateProject, deleteProject, duplicateProject, refetch: fetchProjects };
 }
 
 export function useProject(projectId: string | undefined) {
