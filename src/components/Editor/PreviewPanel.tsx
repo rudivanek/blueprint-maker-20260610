@@ -30,8 +30,9 @@ import { checkChanges, withAnswers } from '../../lib/changeCheck';
 import type { CopyQuestion } from '../../lib/copywriter';
 import { QuestionCard } from './QuestionCard';
 import { VisualEditBar } from './VisualEditBar';
+import { changeElement, pageCss, MAX_ELEMENT_CHARS } from '../../lib/elementChange';
 import {
-  applyEdit, editorFrameHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
+  applyEdit, editorFrameHtml, elementHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
   type EditOp, type Selection,
 } from '../../lib/visualEdit';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
@@ -150,6 +151,82 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   };
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
+
+  // ── Change the selected element with AI (quick check → optional questions → change) ──
+  const [elementAsk, setElementAsk] = useState<{ key: string; label: string; request: string; questions: CopyQuestion[] } | null>(null);
+  useEffect(() => { setElementAsk(a => (a && a.key !== selection?.key ? null : a)); }, [selection?.key]);
+
+  const runElementChange = async (key: string, request: string) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    const current = elementHtml(doc, key);
+    if (!current) return;
+    const controller = new AbortController();
+    const jobId = jobStore.start({
+      kind: 'generate',
+      title: 'Changing the selected element…',
+      estimate: 'Usually 10–40 seconds',
+      cancel: () => controller.abort(),
+    });
+    if (jobId === null) return;
+    try {
+      const change = await changeElement(
+        appSettings.aiProvider ?? 'anthropic',
+        { request, elementHtml: current, pageCss: pageCss(doc), designMd },
+        controller.signal,
+        chars => jobStore.update(jobId, `Writing… ${(chars / 1000).toFixed(1)}K characters`),
+      );
+      if (jobStore.isCancelled(jobId)) return;
+      const before = htmlRef.current;
+      commitEdit({ type: 'replace', key, ...change }, false);
+      if (htmlRef.current === before) {
+        toast('The AI answer could not be used — please try again or rephrase.', 'error');
+        return;
+      }
+      setElementAsk(null);
+      loadIntoEditor(htmlRef.current); // reload so new scripts run
+      ding();
+      toast('Element changed. Not right? Click Undo.', 'success');
+    } catch (e) {
+      if (!jobStore.isCancelled(jobId) && (e as Error).name !== 'AbortError') {
+        toast(e instanceof Error ? e.message : 'Could not change the element', 'error');
+      }
+    } finally {
+      jobStore.finish(jobId);
+    }
+  };
+
+  const handleElementAI = async (request: string) => {
+    const sel = selectionRef.current;
+    const doc = docRef.current;
+    if (!sel || !doc || !hasKey) return;
+    const current = elementHtml(doc, sel.key);
+    if (current.length > MAX_ELEMENT_CHARS) {
+      toast('This element is too large for a quick change — select a smaller part, or use Describe changes.', 'warning');
+      return;
+    }
+    const label = `<${sel.tag}>${sel.text ? ` "${sel.text.slice(0, 40)}"` : ''}`;
+    const jobId = jobStore.start({ kind: 'generate', title: 'Checking your request…', estimate: 'A few seconds' });
+    if (jobId === null) return;
+    let qs: CopyQuestion[] = [];
+    try {
+      qs = await checkChanges(
+        appSettings.aiProvider ?? 'anthropic',
+        `${request}\n\n(This applies to ONE element the reviewer already selected: ${label}. Do not ask which element or section.)`,
+        [],
+      );
+    } catch {
+      qs = [];
+    } finally {
+      jobStore.finish(jobId);
+    }
+    if (jobStore.isCancelled(jobId)) return;
+    if (qs.length > 0) {
+      setElementAsk({ key: sel.key, label, request, questions: qs });
+      return;
+    }
+    void runElementChange(sel.key, request);
+  };
 
   const undo = () => {
     const prev = history[history.length - 1];
@@ -319,7 +396,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="border-b border-[#E5E7EB] bg-white px-4 py-3 shrink-0 space-y-2.5">
+      <div className="border-b border-[#E5E7EB] bg-white px-4 py-3 shrink-0 space-y-2.5 max-h-[55%] overflow-y-auto">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => runGenerate(false)}
@@ -432,16 +509,30 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             onDeselect={() => post({ type: 'deselect' })}
             onUndo={undo}
             onDone={stopEditing}
-          />
+            onAI={hasKey ? request => void handleElementAI(request) : undefined}
+          >
+            {elementAsk && elementAsk.key === selection?.key && (
+              <QuestionCard
+                key={elementAsk.request}
+                title={`A few quick questions before changing ${elementAsk.label}`}
+                questions={elementAsk.questions}
+                submitLabel="Change with these answers"
+                disabled={isBusy}
+                onSubmit={answers => void runElementChange(elementAsk.key, withAnswers(elementAsk.request, elementAsk.questions, answers))}
+                onSkip={() => void runElementChange(elementAsk.key, elementAsk.request)}
+                onCancel={() => setElementAsk(null)}
+              />
+            )}
+          </VisualEditBar>
         )}
 
         {/* Feedback / regenerate row */}
-        {html && lastRequest && !questions && (
+        {html && !editMode && lastRequest && !questions && (
           <p className="text-[11px] text-[#6B7280] truncate" title={lastRequest}>
             <span className="font-medium text-[#374151]">Last change applied:</span> {lastRequest}
           </p>
         )}
-        {html && (
+        {html && !editMode && (
           <div className="flex items-start gap-2">
             <textarea
               value={feedback}
@@ -462,7 +553,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             </button>
           </div>
         )}
-        {html && questions && questions.length > 0 && (
+        {html && !editMode && questions && questions.length > 0 && (
           <QuestionCard
             title="A few quick questions before the page is rebuilt"
             questions={questions}

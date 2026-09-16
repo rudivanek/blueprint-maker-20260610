@@ -4,7 +4,7 @@
 // and the direct edits for it — text, image, link, delete — plus Undo / Done.
 
 import { useEffect, useState } from 'react';
-import { ArrowUp, Check, Image as ImageIcon, Link2, MousePointerClick, Trash2, Type, Undo2, X } from 'lucide-react';
+import { ArrowUp, Check, Image as ImageIcon, Link2, MousePointerClick, Sparkles, Trash2, Type, Undo2, X } from 'lucide-react';
 import type { Selection } from '../../lib/visualEdit';
 
 interface VisualEditBarProps {
@@ -19,6 +19,10 @@ interface VisualEditBarProps {
   onDeselect: () => void;
   onUndo: () => void;
   onDone: () => void;
+  /** "Change with AI" for the selected element; undefined = no AI key */
+  onAI?: (request: string) => void;
+  /** Extra content below the selection (e.g. the AI's questions) */
+  children?: React.ReactNode;
 }
 
 const input = 'min-w-0 flex-1 bg-white border border-[#E5E7EB] px-2.5 py-1.5 text-xs text-[#111827] focus:outline-none focus:border-[#2575FC]';
@@ -29,12 +33,14 @@ export function VisualEditBar(p: VisualEditBarProps) {
   const [src, setSrc] = useState('');
   const [href, setHref] = useState('');
   const [label, setLabel] = useState('');
+  const [ask, setAsk] = useState('');
 
   useEffect(() => {
     setSrc(s?.image?.src ?? '');
     setHref(s?.link?.href ?? '');
     setLabel(s?.link?.text ?? '');
   }, [s?.key, s?.image?.src, s?.link?.href, s?.link?.text]);
+  useEffect(() => { setAsk(''); }, [s?.key]);
 
   return (
     <div className="border border-[#2575FC]/30 bg-[#EFF5FF] px-3 py-2.5 space-y-2">
@@ -97,9 +103,26 @@ export function VisualEditBar(p: VisualEditBarProps) {
             </form>
           )}
 
-          {!s.canText && !s.image && !s.link && (
-            <p className="text-[11px] text-[#6B7280]">For layout, colors or new widgets, use <b>Describe changes</b> below.</p>
+          {p.onAI ? (
+            <form className="flex items-start gap-2 pt-1 border-t border-[#F3F4F6]" onSubmit={e => { e.preventDefault(); if (ask.trim()) p.onAI?.(ask.trim()); }}>
+              <Sparkles className="w-3.5 h-3.5 text-[#2575FC] shrink-0 mt-2" />
+              <textarea
+                value={ask}
+                onChange={e => setAsk(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && ask.trim()) { e.preventDefault(); p.onAI?.(ask.trim()); } }}
+                rows={1}
+                placeholder='Change this element with AI, e.g. "make this a slider with autoplay", "put these cards in 3 columns"'
+                aria-label="Change this element with AI"
+                className={`${input} resize-y leading-snug`}
+              />
+              <button type="submit" disabled={!ask.trim()} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2575FC] hover:bg-[#1a5fe0] text-white text-xs font-medium disabled:opacity-40 shrink-0" title="Ctrl/⌘ + Enter · ≈ $0.02–0.08">
+                Change with AI
+              </button>
+            </form>
+          ) : (!s.canText && !s.image && !s.link) && (
+            <p className="text-[11px] text-[#6B7280]">For layout, colors or new widgets: click <b>Done</b>, then use <b>Describe changes</b>.</p>
           )}
+          {p.children}
         </div>
       )}
     </div>

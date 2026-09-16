@@ -23,6 +23,7 @@ const PURPOSE_LABELS: Record<string, string> = {
   'copy-questions': 'Copy: check description',
   'copy-write': 'Copy: write it for me',
   'change-questions': 'Preview: check changes',
+  'element-change': 'Preview: change element',
 };
 
 type Group = 'day' | 'project' | 'purpose';

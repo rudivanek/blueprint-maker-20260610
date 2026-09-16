@@ -32,7 +32,8 @@ export type EditOp =
   | { type: 'text'; key: string; html: string }
   | { type: 'image'; key: string; src: string }
   | { type: 'link'; key: string; href: string; text: string }
-  | { type: 'delete'; key: string };
+  | { type: 'delete'; key: string }
+  | { type: 'replace'; key: string; html: string; css: string; js: string };
 
 export function hasManualEdits(html: string): boolean {
   return html.includes(EDITED_MARKER);
@@ -79,6 +80,7 @@ export function editorFrameHtml(doc: Document, scrollY: number): string {
 }
 
 const DROP_TAGS = 'script,style,iframe,object,embed,link,meta,form,input,textarea,select';
+const DROP_IN_REPLACEMENT = 'script,style,object,embed,link,meta,base';
 
 /** Clean text-edit HTML coming from the iframe. */
 export function sanitizeInline(html: string): string {
@@ -139,7 +141,57 @@ export function applyEdit(doc: Document, op: EditOp): boolean {
     case 'delete':
       el.remove();
       return true;
+    case 'replace': {
+      const nodes = parseReplacement(doc, op.html);
+      if (!nodes) return false;
+      el.replaceWith(...nodes);
+      if (op.css.trim()) {
+        const style = doc.createElement('style');
+        style.setAttribute('data-bpm-ai', '');
+        style.textContent = op.css.replace(/<\/style/gi, '<\\/style');
+        doc.head.appendChild(style);
+      }
+      if (op.js.trim()) {
+        const script = doc.createElement('script');
+        script.setAttribute('data-bpm-ai', '');
+        script.textContent = `(function(){function run(){try{\n${op.js.replace(/<\/script/gi, '<\\/script')}\n}catch(e){console.error(e)}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run);else run();})();`;
+        doc.body.appendChild(script);
+      }
+      let max = 0;
+      doc.querySelectorAll('[data-bpm-k]').forEach(e => { max = Math.max(max, Number(e.getAttribute('data-bpm-k')) || 0); });
+      doc.body.querySelectorAll('*:not([data-bpm-k])').forEach(e => e.setAttribute('data-bpm-k', String(++max)));
+      return true;
+    }
   }
+}
+
+/** The element's HTML without editor keys (what the AI gets). */
+export function elementHtml(doc: Document, key: string): string {
+  const el = doc.querySelector(`[data-bpm-k="${CSS.escape(key)}"]`);
+  if (!el) return '';
+  const copy = el.cloneNode(true) as Element;
+  copy.removeAttribute('data-bpm-k');
+  copy.querySelectorAll('[data-bpm-k]').forEach(e => e.removeAttribute('data-bpm-k'));
+  return copy.outerHTML;
+}
+
+/** Cleaned nodes for an AI replacement, or null when it isn't a safe element-level fragment. */
+function parseReplacement(doc: Document, html: string): Node[] | null {
+  if (/<\s*(html|head|body)[\s>]/i.test(html)) return null;
+  const tpl = doc.createElement('template');
+  tpl.innerHTML = html;
+  const frag = tpl.content;
+  frag.querySelectorAll(DROP_IN_REPLACEMENT).forEach(el => el.remove());
+  frag.querySelectorAll('*').forEach(el => {
+    for (const a of [...el.attributes]) {
+      const name = a.name.toLowerCase();
+      if (name.startsWith('on') || name.startsWith('data-bpm')) el.removeAttribute(a.name);
+      else if ((name === 'href' || name === 'src' || name === 'action' || name === 'formaction') && !safeUrl(a.value)) el.removeAttribute(a.name);
+    }
+  });
+  const nodes = [...frag.childNodes].filter(n => n.nodeType === 1 || (n.nodeType === 3 && n.textContent?.trim()));
+  if (!nodes.some(n => n.nodeType === 1)) return null;
+  return nodes.map(n => doc.importNode(n, true));
 }
 
 const EDITOR_CSS = `
