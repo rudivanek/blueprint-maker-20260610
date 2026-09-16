@@ -26,6 +26,7 @@ import { loadSettings } from '../lib/settings';
 import { setUsageProject } from '../lib/aiProxy';
 import { LEGACY_MODEL, providerOf, setActiveModel } from '../lib/models';
 import { ModelSelect } from '../components/ui/ModelSelect';
+import { EDITOR_MODES, defaultMode, readMode, saveMode, type EditorMode } from '../lib/editorMode';
 import { makeThumbnail } from '../lib/screenshot';
 import { useKeyStatus } from '../hooks/useKeyStatus';
 import { SECTION_TEMPLATES } from '../types';
@@ -74,17 +75,11 @@ export function EditorPage({ user }: EditorPageProps) {
   const [showCustomInstructions, setShowCustomInstructions] = useState(false);
   const [showScreenshotPanel, setShowScreenshotPanel] = useState(false);
 
-  // Guided (wizard) or Advanced (full editor). Remembered per project in this browser.
-  const modeKey = `bpm_mode_${projectId}`;
-  const [savedMode, setSavedMode] = useState<'guided' | 'advanced' | null>(() => {
-    try {
-      const v = localStorage.getItem(modeKey);
-      return v === 'guided' || v === 'advanced' ? v : null;
-    } catch { return null; }
-  });
-  const switchMode = (m: 'guided' | 'advanced') => {
+  // Builder Kit, Guided (wizard) or Advanced (full editor). Remembered per project in this browser.
+  const [savedMode, setSavedMode] = useState<EditorMode | null>(() => readMode(projectId));
+  const switchMode = (m: EditorMode) => {
     setSavedMode(m);
-    try { localStorage.setItem(modeKey, m); } catch { /* ignore */ }
+    saveMode(projectId, m);
   };
 
   // Per-page screenshots: map of pageId → screenshot data string
@@ -325,8 +320,10 @@ export function EditorPage({ user }: EditorPageProps) {
   const allSectionsMap: Record<string, Section[]> = { ...allSectionsRef.current };
   allSectionsMap[activePageId || ''] = sections;
 
-  // Default: Guided for projects created with a workflow, Advanced for older/manual ones.
-  const guided = (savedMode ?? (project.preset && project.preset !== 'manual' ? 'guided' : 'advanced')) === 'guided';
+  // Default (lib/editorMode): Builder Kit for new projects, Guided for older workflow projects, Advanced for manual ones.
+  const mode: EditorMode = savedMode ?? defaultMode(project);
+  const kitMode = mode === 'kit';
+  const guided = mode !== 'advanced';
 
   // Dot on the Preview tab: green = prototype in sync, amber = outdated
   const activePageForStatus = pages.find(p => p.id === activePageId);
@@ -356,14 +353,16 @@ export function EditorPage({ user }: EditorPageProps) {
                 onChange={id => { void updateProject({ ai_model: id }); triggerSaved(); }}
               />
             </label>
-            <div className="flex border border-[#E5E7EB] text-xs" title="Guided = step by step · Advanced = the full editor">
-              {(['guided', 'advanced'] as const).map(m => (
+            <div className="flex border border-[#E5E7EB] text-xs" role="group" aria-label="Editor mode">
+              {EDITOR_MODES.map(m => (
                 <button
-                  key={m}
-                  onClick={() => switchMode(m)}
-                  className={`px-3 py-1.5 transition-colors ${(m === 'guided') === guided ? 'bg-[#2575FC] text-white' : 'bg-white text-[#6B7280] hover:text-[#111827]'}`}
+                  key={m.id}
+                  onClick={() => switchMode(m.id)}
+                  title={m.hint}
+                  aria-pressed={m.id === mode}
+                  className={`px-3 py-1.5 transition-colors whitespace-nowrap ${m.id === mode ? 'bg-[#2575FC] text-white' : 'bg-white text-[#6B7280] hover:text-[#111827]'}`}
                 >
-                  {m === 'guided' ? 'Guided' : 'Advanced'}
+                  {m.label}
                 </button>
               ))}
             </div>
@@ -549,7 +548,7 @@ export function EditorPage({ user }: EditorPageProps) {
               </div>
             ))}
 
-            {!showAddPage ? (
+            {kitMode ? null : !showAddPage ? (
               <button
                 onClick={() => setShowAddPage(true)}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-[#9CA3AF] hover:text-[#2575FC] hover:bg-white text-xs transition-all shrink-0"
@@ -577,6 +576,8 @@ export function EditorPage({ user }: EditorPageProps) {
             <div className="flex-1 overflow-auto" id="bpm-guided-scroll">
               {activePage ? (
                 <GuidedEditor
+                  key={mode}
+                  kit={kitMode}
                   project={project}
                   page={activePage}
                   pages={pages}

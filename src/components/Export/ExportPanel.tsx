@@ -81,6 +81,8 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
     hasCopy: pages.some(p => p.copy_md),
     hasImages: pages.some(p => p.images_md),
     hasScreenshots: includeScreenshots && hasAnyScreenshot,
+    hasSite: true,
+    sectionCount: pages.length === 1 ? activeSections.length : undefined,
     pages: pages.map(p => p.page_name),
   });
 
@@ -146,7 +148,7 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
         )}
 
         <p className="text-[#9CA3AF] text-[10px] text-center mt-2">
-          {comboList.length > 2 ? `${comboList.length} prompts` : comboList.map(c => promptFileName(c.tool, c.output)).join(' + ')} + design.md + blueprint.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{pages.some(p => p.generated_html) ? ' + prototype.html + changes.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
+          {comboList.length > 2 ? `${comboList.length} prompts` : comboList.map(c => promptFileName(c.tool, c.output)).join(' + ')} + design.md + blueprint.md + site.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{pages.some(p => p.generated_html) ? ' + prototype.html + changes.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
         </p>
       </div>
 

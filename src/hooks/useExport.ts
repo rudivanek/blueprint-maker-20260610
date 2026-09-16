@@ -4,6 +4,7 @@ import { generateBlueprintMd } from '../lib/prompts';
 import { buildBuilderPrompt, combos, promptFileName, readmePromptLines, type ExportTargets } from '../lib/builderPrompts';
 import { checkFabrication, factCheckMd } from '../lib/pageAssets';
 import { changesMd, cleanPrototypeHtml, readChanges } from '../lib/changeLog';
+import { siteMd } from '../lib/kitFiles';
 
 async function screenshotToBase64(data: string): Promise<string> {
   if (data.startsWith('data:')) return data.split(',')[1];
@@ -31,6 +32,8 @@ export function useExport() {
     screenshotMap: Record<string, string> = {},
     includeScreenshots = false,
     targets: ExportTargets = { tools: ['bolt'], outputs: ['react'] },
+    /** Builder Kit: its own ZIP name and README.md */
+    opts: { zipName?: string; readme?: string } = {},
   ) => {
     setExporting(true);
     try {
@@ -52,6 +55,8 @@ export function useExport() {
         hasCopy: pages.some(p => p.copy_md),
         hasImages: pages.some(p => p.images_md),
         hasScreenshots,
+        hasSite: true,
+        sectionCount: pages.length === 1 ? (allSections[pages[0].id] || []).length : undefined,
         pages: pages.map(p => p.page_name),
       };
       const promptTargets: ExportTargets = combos(targets).length ? targets : { tools: ['bolt'], outputs: ['react'] };
@@ -76,6 +81,7 @@ export function useExport() {
           zip.file(`fact-check${suffix}.md`, factCheckMd(page.page_name, checkFabrication(sections, page.copy_md)));
         }
         if (page.images_md) zip.file(`images${suffix}.md`, page.images_md);
+        zip.file(`site${suffix}.md`, siteMd(project, page));
 
         // The approved prototype (with all later changes) + the change list
         if (page.generated_html) zip.file(`prototype${suffix}.html`, cleanPrototypeHtml(page.generated_html));
@@ -104,6 +110,9 @@ Date: ${new Date().toISOString().split('T')[0]}
 ${readmePromptLines(promptTargets)}
 - design.md — Complete design system (colors, fonts, spacing, components)
 ${multiPage
+  ? pages.map(p => `- site-${p.slug || p.page_name.toLowerCase().replace(/\s+/g, '-')}.md — ${p.page_name}: navigation, footer, SEO`).join('\n')
+  : '- site.md — Navigation, footer, social links and SEO title / description'}
+${multiPage
   ? pages.map(p => `- blueprint-${p.slug}.md — ${p.page_name} page structure`).join('\n')
   : '- blueprint.md — Page structure and section definitions'}
 ${pages.some(p => p.copy_md)
@@ -130,16 +139,17 @@ ${screenshotPages.length > 0
 ## How to Use
 1. Open your AI tool of choice
 2. Paste the matching prompt-<tool>-<output>.txt as your first message
-3. Attach design.md, the blueprint.md file(s) and — if present — copy.md, images.md, prototype.html and changes.md
+3. Attach design.md, the blueprint.md file(s), site.md and — if present — copy.md, images.md, prototype.html and changes.md
 ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual reference\n5. Hit send and review the output' : '4. Hit send and review the output'}
 `;
-      zip.file('README.txt', readme);
+      if (opts.readme) zip.file('README.md', opts.readme);
+      else zip.file('README.txt', readme);
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${project.name.replace(/\s+/g, '-').toLowerCase()}-blueprint.zip`;
+      a.download = opts.zipName ?? `${project.name.replace(/\s+/g, '-').toLowerCase()}-blueprint.zip`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {

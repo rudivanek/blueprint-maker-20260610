@@ -8,6 +8,7 @@ import { loadSettings } from '../lib/settings';
 import { DEFAULT_MODEL } from '../lib/models';
 import { PRESETS, getPreset } from '../lib/presets';
 import type { ProjectPreset } from '../types';
+import { saveMode } from '../lib/editorMode';
 import type { User } from '@supabase/supabase-js';
 
 interface ProjectsPageProps {
@@ -85,6 +86,8 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
     setCreating(false);
     if (project) {
       setShowNewModal(false);
+      // New projects start in Builder Kit (manual set-up: the full editor)
+      saveMode(project.id, isManual ? 'advanced' : 'kit');
       navigate(`/editor/${project.id}`);
     }
   };

@@ -18,6 +18,8 @@ import { DesignPanel } from './DesignPanel';
 import { SectionCard } from './SectionCard';
 import { PreviewPanel } from './PreviewPanel';
 import { ExportPanel } from '../Export/ExportPanel';
+import { KitFiles, KitStep } from './BuilderKit';
+import type { KitInput } from '../../lib/kitFiles';
 import { getPreset } from '../../lib/presets';
 import { checkFabrication } from '../../lib/pageAssets';
 import { AI_COPY_MARKER } from '../../lib/presets';
@@ -36,6 +38,14 @@ const STEP_LABELS: Record<StepId, { title: string; sub: string }> = {
   export: { title: 'Export', sub: 'Download ZIP' },
 };
 
+// Builder Kit mode: same steps without the prototype, different names
+const KIT_LABELS: Record<StepId, { title: string; sub: string }> = {
+  ...STEP_LABELS,
+  content: { title: 'Source', sub: 'Get the page text' },
+  review: { title: 'Quick check', sub: 'Check sections' },
+  export: { title: 'Download kit', sub: 'Files & prompts' },
+};
+
 type ContentMode = 'url' | 'paste' | 'write';
 function contentModeFor(presetId: string | undefined): ContentMode {
   if (presetId === 'content') return 'paste';
@@ -44,6 +54,8 @@ function contentModeFor(presetId: string | undefined): ContentMode {
 }
 
 interface GuidedEditorProps {
+  /** Builder Kit mode: Source → Design → Quick check → Download kit (no prototype step) */
+  kit?: boolean;
   project: Project;
   page: Page;
   pages: Page[];
@@ -82,7 +94,9 @@ export function GuidedEditor(props: GuidedEditorProps) {
   const { project, page, sections } = props;
   const preset = getPreset(project.preset);
 
-  const order: StepId[] = ['content', 'design', 'review', 'prototype', 'export'];
+  const kit = !!props.kit;
+  const LABELS = kit ? KIT_LABELS : STEP_LABELS;
+  const order: StepId[] = kit ? ['content', 'design', 'review', 'export'] : ['content', 'design', 'review', 'prototype', 'export'];
 
   // New pasted / AI-written text that isn't built into sections yet (reported by ImportPanel)
   const [pendingText, setPendingText] = useState(false);
@@ -109,10 +123,13 @@ export function GuidedEditor(props: GuidedEditorProps) {
       : sync.prototype === 'current'
         ? { tone: 'green', text: sync.changes ? `In sync · ${plural(sync.changes, 'change')}` : 'In sync' }
         : undefined,
-    export: sync.prototype === 'outdated'
-      ? { tone: 'amber', text: 'Prototype outdated' }
-      : sync.prototype === 'current' ? { tone: 'green', text: 'Ready' } : undefined,
+    export: kit
+      ? (done.content && done.design && reviewed ? { tone: 'green', text: 'Ready' } : undefined)
+      : sync.prototype === 'outdated'
+        ? { tone: 'amber', text: 'Prototype outdated' }
+        : sync.prototype === 'current' ? { tone: 'green', text: 'Ready' } : undefined,
   };
+  const kitInput: KitInput = { project, page, sections, screenshot: props.screenshotMap[page.id], reviewed };
 
   // A step opens when it is already done, or when every step before it is done.
   const canOpen = (i: number) => done[order[i]] || order.slice(0, i).every(id => done[id]);
@@ -164,6 +181,7 @@ export function GuidedEditor(props: GuidedEditorProps) {
     <div className="max-w-[980px] mx-auto px-6 py-6">
       {/* Workflow line */}
       <div className="flex items-center gap-2 text-xs text-[#6B7280] mb-3">
+        {kit && <span className="px-2 py-0.5 bg-[#111827] text-white font-medium">Builder Kit</span>}
         <span>Workflow:</span>
         <span className="px-2 py-0.5 border border-[#E5E7EB] bg-[#F9FAFB] text-[#111827]">{preset?.title ?? 'Custom'}</span>
         {preset && <span className="hidden sm:inline truncate">— {preset.desc}</span>}
@@ -188,10 +206,10 @@ export function GuidedEditor(props: GuidedEditorProps) {
               </span>
               <span className="min-w-0">
                 <span className={`flex items-center gap-1 text-[13px] font-medium ${isCurrent ? 'text-[#2575FC]' : isDone ? 'text-[#111827]' : 'text-[#9CA3AF]'}`}>
-                  {STEP_LABELS[id].title}
+                  {LABELS[id].title}
                   {locked && <Lock className="w-3 h-3" />}
                 </span>
-                <span className="block text-[11px] text-[#9CA3AF] truncate">{STEP_LABELS[id].sub}</span>
+                <span className="block text-[11px] text-[#9CA3AF] truncate">{LABELS[id].sub}</span>
                 {badges[id] && (
                   <span
                     className={`mt-1 inline-flex items-center gap-1 px-1.5 py-px text-[10px] font-medium border max-w-full truncate ${badges[id]!.tone === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-green-50 border-green-200 text-green-700'}`}
@@ -206,13 +224,48 @@ export function GuidedEditor(props: GuidedEditorProps) {
         })}
       </div>
 
+      {/* Builder Kit: every file, downloadable as soon as it is ready */}
+      {kit && (
+        <div className="mb-6">
+          <KitFiles input={kitInput} compact />
+        </div>
+      )}
+
       {/* Step body */}
       <div className="border border-[#E5E7EB] bg-white">
         {step === 'content' && <ContentStep {...props} n={current + 1} onPendingChange={onPendingChange} pendingText={pendingText} />}
         {step === 'design' && <DesignStep {...props} n={current + 1} />}
         {step === 'review' && <ReviewStep {...props} n={current + 1} />}
         {step === 'prototype' && <PrototypeStep {...props} n={current + 1} />}
-        {step === 'export' && (
+        {kit && step !== 'export' && (
+          <div className="px-6 pb-5">
+            <KitFiles input={kitInput} step={step === 'prototype' ? 'preview' : step} />
+          </div>
+        )}
+        {kit && step === 'export' && (
+          <>
+            <StepHeader
+              n={current + 1}
+              name="Download kit"
+              title="Download your Builder Kit"
+              lead={<>Choose your builder and the output, then download everything as one ZIP — or single files. Paste the prompt as the first message in the builder and attach the files (the README says which).</>}
+            />
+            <KitStep
+              project={project}
+              page={page}
+              sections={sections}
+              screenshot={props.screenshotMap[page.id]}
+              appSettings={props.appSettings}
+              reviewed={reviewed}
+              onHtmlSaved={props.onHtmlSaved}
+              onSectionSync={props.onSectionSync}
+              onPageUpdate={props.onPageUpdate}
+              onSectionDelete={props.onSectionDelete}
+              onSectionRestore={props.onSectionRestore}
+            />
+          </>
+        )}
+        {!kit && step === 'export' && (
           <ExportStep
             {...props}
             n={current + 1}
@@ -239,12 +292,14 @@ export function GuidedEditor(props: GuidedEditorProps) {
                 disabled={!nextEnabled}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#111827] text-white disabled:bg-[#D1D5DB] disabled:cursor-not-allowed"
               >
-                Next: {STEP_LABELS[order[current + 1]].title} <ArrowRight className="w-4 h-4" />
+                Next: {LABELS[order[current + 1]].title} <ArrowRight className="w-4 h-4" />
               </button>
             </>
           )}
           {isLast && (
-            <span className="text-xs text-[#6B7280]">Next page? Use <b>+ Add Page</b> above — design and export stay shared.</span>
+            <span className="text-xs text-[#6B7280]">{kit
+              ? <>The kit covers this page. Paste the prompt in your builder and attach the files.</>
+              : <>Next page? Use <b>+ Add Page</b> above — design and export stay shared.</>}</span>
           )}
         </div>
       </div>
@@ -340,7 +395,7 @@ function ContentStep(p: StepProps & { onPendingChange: (v: boolean) => void; pen
   const t = texts[mode];
   return (
     <>
-      <StepHeader n={p.n} name="Content" title={t.title} lead={t.lead} what={t.what} need={t.need} time={t.time} />
+      <StepHeader n={p.n} name={p.kit ? 'Source' : 'Content'} title={t.title} lead={t.lead} what={t.what} need={t.need} time={t.time} />
       <div className="px-6 py-5">
         <ImportPanel
           key={`guided-import-${p.page.id}`}
@@ -478,9 +533,11 @@ function ReviewStep(p: StepProps) {
     <>
       <StepHeader
         n={p.n}
-        name="Review"
+        name={p.kit ? 'Quick check' : 'Review'}
         title="Check what was found"
-        lead="These are the sections of the page, in order. Open one to fix its text or layout. Everything you change here is used for the prototype and the export."
+        lead={p.kit
+          ? 'These are the sections of the page, in order. Open one to fix its text or layout, or delete what you don’t need. Click Next to confirm — then blueprint.md is ready.'
+          : 'These are the sections of the page, in order. Open one to fix its text or layout. Everything you change here is used for the prototype and the export.'}
       />
       <div className="px-6 py-5 grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-5">
         <div className="space-y-3 min-w-0">

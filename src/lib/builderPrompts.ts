@@ -85,6 +85,10 @@ export interface PackageInfo {
   hasCopy: boolean;
   hasImages: boolean;
   hasScreenshots: boolean;
+  /** site.md (navigation, footer, SEO) is included */
+  hasSite?: boolean;
+  /** single page: number of sections in blueprint.md (for the final check) */
+  sectionCount?: number;
   /** page names in order (first = start page) */
   pages: string[];
 }
@@ -99,19 +103,21 @@ function filesBlock(p: PackageInfo): string {
   if (p.hasCopy) list.push(`**${f('copy', 'md')}** — the exact page text. Use it word for word.`);
   if (p.hasImages) list.push(`**${f('images', 'md')}** — real image URLs grouped by section. Use them.`);
   if (p.hasDesign) list.push('**design.md** — design tokens: colours, fonts (with the Google Fonts link), sizes, spacing, components.');
-  if (p.hasScreenshots) list.push(`**${f('screenshot', 'jpg')}** — screenshot of the original page, for reference only.`);
+  if (p.hasSite) list.push('**site.md** — site name, navigation, footer, social links and SEO title / description.');
+  if (p.hasScreenshots) list.push(`**${f('screenshot', 'jpg')}** — screenshot of the original page${p.hasPrototype ? ', for reference only' : ': a guide for the overall look and layout, NOT for texts'}.`);
   return `## Attached files (when they disagree, the higher one wins)
 ${list.map((l, i) => `${i + 1}. ${l}`).join('\n')}
 
 If you can't read attached .md / .html files, ask me to paste their content.`;
 }
 
-const RULES_COMMON = `- Build every section from the blueprint, in the same order. Don't add or drop sections.
+const RULES_COMMON = `- Build every section from the blueprint, in the same order. Don't add, merge or drop sections.
 - Use the texts word for word. Never invent facts, numbers, names, prices, reviews or awards.
+- Don't write new sentences either: no extra taglines, subtitles, intros or button texts that aren't in the files. Short labels that only repeat a section name are fine.
 - Keep any [placeholder] exactly as written and visible — the client fills them in later.
 - Everything interactive must really work: navigation and mobile menu, sliders / carousels (arrows, dots, swipe), galleries with lightbox, tabs, accordions / FAQ, sticky header, smooth scrolling, forms (validation + a thank-you message; no backend unless I ask).
 - Responsive: desktop, tablet and mobile (main breakpoint 768px). No horizontal scrolling.
-- Take colours, fonts and spacing from design.md / prototype.html — no default theme colours. Load the fonts from the Google Fonts link in design.md.
+- Take colours, fonts and spacing from design.md / prototype.html — no default theme colours. Load the fonts from the Google Fonts link in design.md. Use design.md fully: heading font and sizes, body font, buttons, cards, section backgrounds.
 - Use the real image URLs. Only if an image is missing, use a neutral placeholder of the right size.
 - Accessible: semantic HTML, one h1, alt texts, visible focus, keyboard support, good contrast.`;
 
@@ -121,7 +127,7 @@ ${RULES_COMMON}
 
 const RULES_HTML = `## Rules
 ${RULES_COMMON}
-- ONE self-contained file: index.html with all CSS in one <style> in the head and all JavaScript in one <script> just before </body>.
+- ONE self-contained file: index.html with all CSS in one <style> in the head and all JavaScript in one <script> just before </body>. Even if your tool normally creates a React / Vite app: don't — the result must open by double-clicking index.html, with no server and no build.
 - No frameworks, no build step, no npm packages, no CSS frameworks, no jQuery. Plain, modern HTML, CSS and JavaScript. Only external resources: Google Fonts and the image URLs.
 - Put the design tokens from design.md in :root CSS variables and use them everywhere.
 - JavaScript: wrap it in DOMContentLoaded, connect widgets with data-attributes, keep it compact. All content must still be visible if JavaScript doesn't run.
@@ -218,8 +224,24 @@ const HTML_HOW: Record<BuilderId, string> = {
   chat: 'Reply with the complete index.html in ONE code block — no explanations, no "…" shortcuts. If it gets too long, stop at the end of a section and continue when I say "continue".',
 };
 
+/** Without a prototype, the texts mustn't point the builder to prototype.html. */
+function withoutPrototype(text: string): string {
+  return text
+    .replace(/\n- If prototype\.html is attached,[^\n]*/g, '')
+    .replace(/- Rebuild the prototype in this stack's idiomatic way[^\n]*/g, "- Use this stack's idiomatic structure: components, not one big file.")
+    .replace(/looks and behaves exactly like prototype\.html/g, 'follows blueprint.md and design.md exactly')
+    .replace(/(design|images)\.md \/ prototype\.html/g, '$1.md')
+    .replace(/docs\/prototype\.html/g, 'docs/blueprint.md')
+    .replace(/prototype\.html/g, 'blueprint.md');
+}
+
 /** The prompt for one tool and one output type. */
 export function buildBuilderPrompt(tool: BuilderId, output: OutputId, p: PackageInfo): string {
+  const text = promptText(tool, output, p);
+  return p.hasPrototype ? text : withoutPrototype(text);
+}
+
+function promptText(tool: BuilderId, output: OutputId, p: PackageInfo): string {
   const name = TOOL_NAME[tool];
   const intro = output === 'html'
     ? `Build it as ONE self-contained, production-quality HTML file.`
@@ -230,6 +252,13 @@ export function buildBuilderPrompt(tool: BuilderId, output: OutputId, p: Package
 - Google Fonts link from design.md; image URLs from images.md / prototype.html`
     : `## Stack
 ${REACT[tool].stack}`;
+  const noProto = p.hasPrototype ? '' : `
+
+## Design
+There is no prototype, so you design the page — within design.md. Make it look like a premium, modern website: a strong hero, clear visual hierarchy, generous spacing, and varied section layouts (don't repeat the same centered block for every section). Follow each section's Layout Contract; where it leaves room, choose the stronger layout.`;
+  const check = p.sectionCount && p.pages.length <= 1
+    ? `\n\n## Before you finish\nCheck: the page has all ${p.sectionCount} sections of blueprint.md in order, every text is from the files, every [placeholder] is still there, every link and widget works${output === 'html' ? ', and the result is one index.html' : ''}.`
+    : '';
   return `# Build the website "${p.projectName}" (${name} · ${output === 'html' ? 'single HTML file' : tool === 'v0' ? 'Next.js + Tailwind' : 'React + Tailwind'})
 
 A client approved ${p.hasPrototype ? 'the attached HTML prototype' : 'the attached blueprint and design'}. ${intro}
@@ -238,10 +267,10 @@ ${filesBlock(p)}
 
 ${stack}
 
-${output === 'html' ? RULES_HTML : RULES_REACT}
+${output === 'html' ? RULES_HTML : RULES_REACT}${noProto}
 
 ## How to work
-${output === 'html' ? HTML_HOW[tool] : REACT[tool].how}
+${output === 'html' ? HTML_HOW[tool] : REACT[tool].how}${check}
 ${pagesBlock(p, output)}
 `;
 }

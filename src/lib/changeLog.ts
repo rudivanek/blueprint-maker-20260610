@@ -10,6 +10,19 @@
 import type { Page, PrototypeChange, Section } from '../types';
 
 const MAX_CHANGES = 60;
+/** Long requests (pasted code, a whole design.md) are kept in full — the builder needs all of it. */
+const MAX_REQUEST = 20000;
+const MAX_PLAN = 2000;
+
+const normReq = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+/** "make text white" and "make text white color!" on the same element = one change */
+function sameRequest(a: PrototypeChange, b: PrototypeChange): boolean {
+  if (a.kind !== b.kind || a.kind === 'edit') return false;
+  if ((a.sectionId ?? '') !== (b.sectionId ?? '') || (a.target ?? '') !== (b.target ?? '')) return false;
+  const x = normReq(a.request);
+  const y = normReq(b.request);
+  return !!x && !!y && (x.includes(y) || y.includes(x));
+}
 
 export function readChanges(page: Pick<Page, 'prototype_changes'> | null | undefined): PrototypeChange[] {
   const raw = page?.prototype_changes;
@@ -22,8 +35,8 @@ export function addChange(list: PrototypeChange[], entry: Omit<PrototypeChange, 
     ...entry,
     id: Math.random().toString(36).slice(2, 10),
     at: new Date().toISOString(),
-    request: entry.request.trim().slice(0, 600),
-    plan: entry.plan?.trim().slice(0, 600) || undefined,
+    request: entry.request.trim().slice(0, MAX_REQUEST),
+    plan: entry.plan?.trim().slice(0, MAX_PLAN) || undefined,
   };
   // repeated manual edits of the same text: keep one entry (old → newest)
   const last = list[list.length - 1];
@@ -31,7 +44,10 @@ export function addChange(list: PrototypeChange[], entry: Omit<PrototypeChange, 
     const merged: PrototypeChange = { ...last, to: full.to, at: full.at, request: describeEdit(last.what ?? 'Text', last.from ?? '', full.to ?? '') };
     return [...list.slice(0, -1), merged];
   }
-  return [...list, full].slice(-MAX_CHANGES);
+  // the same request again on the same element: keep only the newest
+  const dup = list.findIndex(c => sameRequest(c, full));
+  const rest = dup < 0 ? list : list.filter((_, i) => i !== dup);
+  return [...rest, full].slice(-MAX_CHANGES);
 }
 
 const cut = (s: string, n = 120) => {

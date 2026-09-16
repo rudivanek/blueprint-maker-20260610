@@ -12,7 +12,7 @@ const sections = [
   { id: 'overview', num: '01', title: 'Overview' },
   { id: 'projects', num: '02', title: 'Projects' },
   { id: 'create', num: '03', title: 'Create a project: choose a workflow' },
-  { id: 'guided', num: '04', title: 'Guided and Advanced mode' },
+  { id: 'guided', num: '04', title: 'Builder Kit, Guided and Advanced' },
   { id: 'content', num: '05', title: 'Step 1 · Content' },
   { id: 'design', num: '06', title: 'Step 2 · Design system' },
   { id: 'review', num: '07', title: 'Step 3 · Review sections' },
@@ -44,6 +44,14 @@ const steps = [
   { step: '5 · Export', what: 'Download the ZIP for Bolt, Claude, Lovable and others.' },
 ];
 
+const kitFilesHelp = [
+  { file: 'copy.md · images.md · site.md · screenshot.jpg', when: 'After Source (import, paste or write). The screenshot only exists right after an import, in the same browser session.' },
+  { file: 'design.md', when: 'After Design.' },
+  { file: 'blueprint.md · fact-check.md', when: 'After Quick check (click Next to confirm the sections).' },
+  { file: 'prompt-<builder>-<output>.txt · README.md · ZIP', when: 'In Download kit — one prompt per chosen builder and output.' },
+  { file: 'prototype.html · changes.md', when: 'Only if you make the optional quick preview.' },
+];
+
 const badges = [
   { badge: 'Text not built yet (Content)', meaning: 'You pasted or wrote new text but haven’t clicked Build Sections — the next steps still use the previous sections.' },
   { badge: 'In sync · N changes (Prototype)', meaning: 'The prototype matches the sections and the design. N = entries in its change list.' },
@@ -60,6 +68,7 @@ const costs = [
   { task: 'Chat reply before a change', cost: '~$0.01 per message' },
   { task: 'Change with AI (one element)', cost: '~$0.02–0.08 (10–40 seconds)' },
   { task: 'Edit on page, sync, versions, export', cost: 'Free (no AI)' },
+  { task: 'Builder Kit (import + design, no preview)', cost: '2 scrapes + ~$0.35' },
   { task: 'Note', cost: 'Costs above are for Claude Sonnet 4.6. Sonnet 5 costs about ⅔ of that, Opus 5 about 1.7×, Fable 5.1 about 3.3×. The app shows the estimate for the project’s model.' },
 ];
 
@@ -144,6 +153,7 @@ export function HelpPage({ user, onSignOut }: HelpPageProps) {
               <section id="overview" className="help-section">
                 <StepHeader num="01" title="Overview" />
                 <div className="help-body">
+                  <p>New projects open in <strong>Builder Kit</strong>: four short steps that give you only the files an AI builder needs (chapter 4). Guided and Advanced still offer the full prototype workflow.</p>
                   <p>Blueprint Maker turns a website, your own text or a short description into an AI-ready package: <code>design.md</code> (design system), <code>blueprint.md</code> (page structure), <code>copy.md</code> (exact texts), <code>images.md</code> (real image URLs), a fact-check, a master prompt — and a working HTML prototype you can refine inside the app. Take the ZIP to Bolt, Claude, Lovable, etc.</p>
                 </div>
               </section>
@@ -182,9 +192,27 @@ export function HelpPage({ user, onSignOut }: HelpPageProps) {
               </section>
 
               <section id="guided" className="help-section">
-                <StepHeader num="04" title="Guided and Advanced mode" />
+                <StepHeader num="04" title="Builder Kit, Guided and Advanced" />
                 <div className="help-body">
-                  <p>Switch at the top right. <strong>Guided</strong> walks you through five steps; <strong>Advanced</strong> shows every tool at once (Sections, Design, Preview, Export tabs). The choice is remembered per project.</p>
+                  <p>Switch at the top right; the choice is remembered per project in this browser. <strong>Builder Kit</strong> is the default for new projects (Set up manually starts in Advanced); older projects keep the mode they had.</p>
+                  <p><strong>Builder Kit</strong> — four steps, one page: <strong>Source</strong> (import, paste or write the text) → <strong>Design</strong> → <strong>Quick check</strong> (fix or delete sections, then Next) → <strong>Download kit</strong> (choose builders and output, download the ZIP or single files). Every file can be downloaded on its own as soon as its step is done — from the <em>Kit files</em> row at the top or inside the step. At the end you can <strong>Also make a quick preview</strong> (≈ $0.30); it is then added as <code>prototype.html</code> and <code>changes.md</code>, and the builder follows it. Without a preview, the prompt tells the builder to design the page itself within <code>design.md</code>.</p>
+                  <table className="help-table">
+                    <thead>
+                      <tr>
+                        <th>Kit file</th>
+                        <th>Ready</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kitFilesHelp.map(k => (
+                        <tr key={k.file}>
+                          <td><strong>{k.file}</strong></td>
+                          <td>{k.when}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p><strong>Guided</strong> walks you through five steps including the prototype; <strong>Advanced</strong> shows every tool at once (Sections, Design, Preview, Export tabs).</p>
                   <table className="help-table">
                     <thead>
                       <tr>
