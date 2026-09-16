@@ -202,7 +202,7 @@ function parseReplacement(doc: Document, html: string): Node[] | null {
   frag.querySelectorAll('*').forEach(el => {
     for (const a of [...el.attributes]) {
       const name = a.name.toLowerCase();
-      if (name.startsWith('on') || name.startsWith('data-bpm')) el.removeAttribute(a.name);
+      if (name.startsWith('on') || /^data-bpm-(k|sel|hover|editing)$/.test(name)) el.removeAttribute(a.name);
       else if ((name === 'href' || name === 'src' || name === 'action' || name === 'formaction') && !safeUrl(a.value)) el.removeAttribute(a.name);
     }
   });

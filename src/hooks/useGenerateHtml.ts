@@ -14,6 +14,7 @@ import { useState, useRef } from 'react';
 import { generateBlueprintMd, getMasterPrompt, getScratchPrompt } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
 import { makeInteractive } from '../lib/interactivePrompt';
+import { markInstructions } from '../lib/prototypeSync';
 import { generateText, type Purpose } from '../lib/aiProxy';
 import type { GlobalSettings, Page, Section, AIProvider } from '../types';
 
@@ -75,6 +76,8 @@ ${args.designMd || '(no design.md provided — use the blueprint section colors 
 === blueprint.md ===
 ${blueprintMd}
 
+${markInstructions(args.sections)}
+
 === PREVIOUS HTML (revise this) ===
 ${args.previousHtml}
 
@@ -88,6 +91,8 @@ ${args.designMd || '(no design.md provided — use the blueprint section colors 
 
 === blueprint.md ===
 ${blueprintMd}
+
+${markInstructions(args.sections)}
 
 Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explanations before or after.`;
 }

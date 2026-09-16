@@ -60,6 +60,8 @@ interface GuidedEditorProps {
   onDesignMdChange: (designMd: string) => void;
   onHtmlSaved: (pageId: string, html: string) => void;
   onSectionUpdate: (id: string, updates: Partial<Section>) => void;
+  /** Edit on page changed a text / image / link → update the section only */
+  onSectionSync: (id: string, updates: Partial<Section>) => void;
   onSectionDelete: (id: string) => void;
   onAddSection: () => void;
   onPageUpdate: (updates: Partial<Page>) => void;
@@ -546,6 +548,8 @@ function PrototypeStep(p: StepProps) {
             screenshot={p.screenshotMap[p.page.id]}
             appSettings={p.appSettings}
             onHtmlSaved={p.onHtmlSaved}
+            onSectionSync={p.onSectionSync}
+            onPageUpdate={p.onPageUpdate}
           />
         </div>
       </div>

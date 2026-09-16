@@ -6,6 +6,8 @@
 // - Generate / Regenerate (with feedback) using useGenerateHtml
 // - "Edit on page": click an element to edit its text, image or link, or delete
 //   it; Undo (lib/visualEdit + VisualEditBar)
+// - Text / image / link edits on the page are written back into the sections
+//   and copy.md (lib/prototypeSync), so all steps and the export stay in sync
 // - "Describe changes" and "Change with AI": a short chat first (lib/changeChat +
 //   ChangeChat) — the AI says what it will do, warns, asks up to 4 questions;
 //   nothing changes until "Yes, do it" (optional: skip for clear requests)
@@ -36,6 +38,7 @@ import {
   applyEdit, editorFrameHtml, elementContext, elementHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
   type EditOp, type Selection,
 } from '../../lib/visualEdit';
+import { cleanNewText, fieldForEdit, getField, replaceInCopyMd, setField, norm, type FieldKind } from '../../lib/prototypeSync';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -47,6 +50,10 @@ interface PreviewPanelProps {
   screenshot?: string;
   appSettings: AppSettings;
   onHtmlSaved: (pageId: string, html: string) => void;
+  /** Edit on page changed a text / image / link → save it into the section too */
+  onSectionSync?: (id: string, updates: Partial<Section>) => void;
+  /** used to keep copy.md in sync */
+  onPageUpdate?: (updates: Partial<Page>) => void;
 }
 
 type Viewport = 'desktop' | 'tablet' | 'mobile';
@@ -56,7 +63,7 @@ const VIEWPORT_WIDTHS: Record<Viewport, string> = {
   mobile: '390px',
 };
 
-export function PreviewPanel({ designMd, globals, page, sections, screenshot, appSettings, onHtmlSaved }: PreviewPanelProps) {
+export function PreviewPanel({ designMd, globals, page, sections, screenshot, appSettings, onHtmlSaved, onSectionSync, onPageUpdate }: PreviewPanelProps) {
   const [html, setHtml] = useState<string>(page.generated_html || '');
   const [feedback, setFeedback] = useState('');
   const [compare, setCompare] = useState(false);
@@ -84,7 +91,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const [editingText, setEditingText] = useState(false);
   const selectionRef = useRef<Selection | null>(null);
   selectionRef.current = selection;
-  const [history, setHistory] = useState<string[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const docRef = useRef<Document | null>(null);
   const htmlRef = useRef(html);
@@ -110,7 +117,83 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   flushRef.current = flushSave;
   useEffect(() => () => flushRef.current(), []);
 
-  const pushHistory = (prev: string) => setHistory(h => [...h.slice(-19), prev]);
+  const pushHistory = (entry: HistoryEntry) => setHistory(h => [...h.slice(-19), entry]);
+
+  // Latest sections / copy.md including our own write-backs (props arrive a moment later)
+  const sectionsRef = useRef(sections);
+  useEffect(() => { sectionsRef.current = sections; }, [sections]);
+  const copyMdRef = useRef(page.copy_md ?? '');
+  useEffect(() => { copyMdRef.current = page.copy_md ?? ''; }, [page.copy_md]);
+
+  /** Before an edit: which section fields does it touch, and their old values */
+  const syncTargets = (doc: Document, op: EditOp): SyncTarget[] => {
+    if (!onSectionSync || (op.type !== 'text' && op.type !== 'image' && op.type !== 'link')) return [];
+    const el = doc.querySelector(`[data-bpm-k="${CSS.escape(op.key)}"]`);
+    if (!el) return [];
+    const list: { kind: FieldKind; old: string }[] = [];
+    if (op.type === 'text') list.push({ kind: 'text', old: el.textContent ?? '' });
+    if (op.type === 'image') {
+      const src = el.tagName === 'IMG' ? el.getAttribute('src') ?? '' : ((el.getAttribute('style') ?? '').match(/url\((['"]?)([^'")]*)\1\)/i)?.[2] ?? '');
+      list.push({ kind: 'src', old: src });
+    }
+    if (op.type === 'link') {
+      if (el.tagName === 'A') list.push({ kind: 'href', old: el.getAttribute('href') ?? '' });
+      if (el.children.length === 0) list.push({ kind: 'text', old: el.textContent ?? '' });
+    }
+    return list
+      .map(t => ({ ...t, el, ref: fieldForEdit(el, t.kind, t.old, sectionsRef.current) }))
+      .filter((t): t is SyncTarget => t.ref !== null);
+  };
+
+  /** After the edit: save changed values into the sections + copy.md. Returns true when something was synced. */
+  const syncBack = (targets: SyncTarget[], op: EditOp): boolean => {
+    if (!onSectionSync || targets.length === 0) return false;
+    let list = sectionsRef.current;
+    let copyMd = copyMdRef.current;
+    const touched = new Set<string>();
+    for (const t of targets) {
+      const section = list.find(s => s.id === t.ref.sectionId);
+      if (!section) continue;
+      const oldValue = getField(section, t.ref.path);
+      let value: string;
+      if (t.kind === 'text') value = cleanNewText(t.el.textContent ?? '', t.old, oldValue);
+      else if (t.kind === 'src') value = op.type === 'image' ? op.src.trim() : oldValue;
+      else value = op.type === 'link' && op.href.trim() ? op.href.trim() : oldValue;
+      if (value === oldValue || (t.kind === 'text' && norm(value) === norm(oldValue))) continue;
+      const patch = setField(section, t.ref.path, value);
+      list = list.map(s => (s.id === section.id ? { ...s, ...patch } : s));
+      touched.add(section.id);
+      if (t.kind === 'text') copyMd = replaceInCopyMd(copyMd, oldValue, value) ?? copyMd;
+    }
+    if (touched.size === 0) return false;
+    sectionsRef.current = list;
+    for (const id of touched) {
+      const s = list.find(x => x.id === id)!;
+      onSectionSync(id, { copy: s.copy, items: s.items, images: s.images });
+    }
+    if (copyMd !== copyMdRef.current) {
+      copyMdRef.current = copyMd;
+      onPageUpdate?.({ copy_md: copyMd });
+    }
+    return true;
+  };
+
+  /** Undo: put the sections / copy.md back the way they were before the edit */
+  const restoreSections = (entry: HistoryEntry) => {
+    if (!entry.sections || !onSectionSync) return;
+    const cur = sectionsRef.current;
+    for (const old of entry.sections) {
+      const now = cur.find(s => s.id === old.id);
+      if (!now) continue;
+      const pick = (s: Section) => JSON.stringify([s.copy, s.items, s.images]);
+      if (pick(now) !== pick(old)) onSectionSync(old.id, { copy: old.copy, items: old.items, images: old.images });
+    }
+    sectionsRef.current = cur.map(s => entry.sections!.find(o => o.id === s.id) ?? s);
+    if (entry.copyMd !== undefined && entry.copyMd !== copyMdRef.current) {
+      copyMdRef.current = entry.copyMd;
+      onPageUpdate?.({ copy_md: entry.copyMd });
+    }
+  };
 
   const loadIntoEditor = (source: string) => {
     const doc = keyDocument(source);
@@ -144,9 +227,16 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     const doc = docRef.current;
     if (!doc) return;
     const prev = htmlRef.current;
+    const beforeSections = sectionsRef.current;
+    const beforeCopyMd = copyMdRef.current;
+    const wasCurrent = !isPreviewOutdated(prev, previewSource(designMd, globals, beforeSections));
+    const targets = syncTargets(doc, op);
     if (!applyEdit(doc, op)) return;
-    const next = savedHtml(doc, prev);
-    pushHistory(prev);
+    let next = savedHtml(doc, prev);
+    const synced = syncBack(targets, op);
+    // the prototype already shows the change → keep it "current" for the updated sections
+    if (synced && wasCurrent) next = stampHtml(next, previewSource(designMd, globals, sectionsRef.current));
+    pushHistory(synced ? { html: prev, sections: beforeSections, copyMd: beforeCopyMd } : { html: prev });
     htmlRef.current = next;
     setHtml(next);
     scheduleSave(next);
@@ -276,9 +366,11 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   };
 
   const undo = () => {
-    const prev = history[history.length - 1];
-    if (prev === undefined) return;
+    const entry = history[history.length - 1];
+    if (entry === undefined) return;
+    const prev = entry.html;
     setHistory(h => h.slice(0, -1));
+    restoreSections(entry);
     htmlRef.current = prev;
     setHtml(prev);
     scheduleSave(prev);
@@ -380,7 +472,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (result && !jobStore.isCancelled(jobId)) {
       const keepMarker = isRegenerate && hasManualEdits(htmlRef.current);
       const stamped = stampHtml(result.html, source) + (keepMarker ? `${EDITED_MARKER}\n` : '');
-      if (htmlRef.current) pushHistory(htmlRef.current);
+      if (htmlRef.current) pushHistory({ html: htmlRef.current });
       htmlRef.current = stamped;
       setHtml(stamped);
       onHtmlSaved(page.id, stamped);
@@ -684,4 +776,18 @@ interface ChatState {
 
 function selectionLabel(sel: Selection): string {
   return `<${sel.tag}>${sel.text ? ` "${sel.text.slice(0, 40)}"` : ''}`;
+}
+
+interface HistoryEntry {
+  html: string;
+  /** sections before a synced edit (Undo restores them) */
+  sections?: Section[];
+  copyMd?: string;
+}
+
+interface SyncTarget {
+  kind: FieldKind;
+  old: string;
+  el: Element;
+  ref: NonNullable<ReturnType<typeof fieldForEdit>>;
 }

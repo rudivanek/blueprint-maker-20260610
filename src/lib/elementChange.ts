@@ -25,7 +25,7 @@ Return the replacement for THIS element only.
 
 RULES
 - "html": the complete new HTML that replaces the element (one element, or a few sibling elements if the change needs it). Never return <html>, <head> or <body>. Never include <script> or <style> tags in "html" and no inline event handlers (onclick=…).
-- Keep everything the request doesn't mention: text, images, links, classes, ids and structure. Do not invent new facts, prices, names or reviews.
+- Keep everything the request doesn't mention: text, images, links, classes, ids and structure — including all data-bpm-s and data-bpm-f attributes (the app uses them to keep the page in sync). Copies of marked elements keep the same marks. Do not invent new facts, prices, names or reviews.
 - Reuse the page's existing CSS classes and variables (var(--…)) where possible so the element matches the design.
 - "css": only NEW CSS rules needed for this change (or ""). Scope them with a new, specific class you add to the element (e.g. .ai-slider-3f…) so nothing else on the page changes. Include responsive rules (≤768px) when relevant.
 - "js": only when the element must be interactive (slider, gallery lightbox, tabs, accordion, counter, marquee control…), otherwise "". Plain JavaScript, no libraries, no localStorage, no alert(). It runs once after the page loaded: find the element through its new class (document.querySelectorAll('.your-class').forEach(…)), so it also works when the element appears more than once.

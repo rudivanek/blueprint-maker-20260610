@@ -16,6 +16,7 @@ import { CreatePanel } from '../components/Editor/CreatePanel';
 import { ExportPanel } from '../components/Export/ExportPanel';
 import { PreviewPanel } from '../components/Editor/PreviewPanel';
 import { previewSource, isPreviewOutdated } from '../lib/previewStamp';
+import { usePrototypeSync } from '../hooks/usePrototypeSync';
 import { PresetGuide } from '../components/Editor/PresetGuide';
 import { ProcessingOverlay } from '../components/ui/ProcessingOverlay';
 import { GuidedEditor } from '../components/Editor/GuidedEditor';
@@ -48,6 +49,13 @@ export function EditorPage({ user }: EditorPageProps) {
   const { pages, loading: pagesLoading, createPage, updatePage, deletePage, reorderPages } = usePages(projectId);
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const { sections, createSection, updateSection, deleteSection, replaceAllSections } = useSections(activePageId || undefined);
+  // Section edits → prototype + copy.md (text, images, links)
+  const { noteSectionEdit } = usePrototypeSync({
+    project,
+    page: pages.find(p => p.id === activePageId),
+    sections,
+    updatePage,
+  });
   const [activePanel, setActivePanel] = useState<ActivePanel>('sections');
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showAddPage, setShowAddPage] = useState(false);
@@ -110,6 +118,13 @@ export function EditorPage({ user }: EditorPageProps) {
   }, [updateDesignMd]);
 
   const handleSectionUpdate = useCallback(async (id: string, updates: Partial<Section>) => {
+    noteSectionEdit();
+    await updateSection(id, updates);
+    triggerSaved();
+  }, [updateSection, noteSectionEdit]);
+
+  // Edits made on the prototype itself (Edit on page) → section only; the prototype already has them
+  const handleSectionSync = useCallback(async (id: string, updates: Partial<Section>) => {
     await updateSection(id, updates);
     triggerSaved();
   }, [updateSection]);
@@ -546,6 +561,7 @@ export function EditorPage({ user }: EditorPageProps) {
                   onDesignMdChange={handleDesignMdUpdate}
                   onHtmlSaved={handleGeneratedHtmlSaved}
                   onSectionUpdate={handleSectionUpdate}
+                  onSectionSync={handleSectionSync}
                   onSectionDelete={id => deleteSection(id)}
                   onAddSection={() => setShowTemplateModal(true)}
                   onPageUpdate={updates => { updatePage(activePage.id, updates); triggerSaved(); }}
@@ -571,6 +587,8 @@ export function EditorPage({ user }: EditorPageProps) {
                 screenshot={screenshotMap[activePage.id]}
                 appSettings={appSettings}
                 onHtmlSaved={handleGeneratedHtmlSaved}
+                onSectionSync={handleSectionSync}
+                onPageUpdate={updates => { updatePage(activePage.id, updates); triggerSaved(); }}
               />
             </div>
           ) : (
