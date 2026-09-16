@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Project, Page, Section } from '../types';
-import { generateBlueprintMd, getMasterPrompt } from '../lib/prompts';
+import { generateBlueprintMd } from '../lib/prompts';
+import { buildBuilderPrompt, combos, promptFileName, readmePromptLines, type ExportTargets } from '../lib/builderPrompts';
 import { checkFabrication, factCheckMd } from '../lib/pageAssets';
 import { changesMd, cleanPrototypeHtml, readChanges } from '../lib/changeLog';
 
@@ -28,7 +29,8 @@ export function useExport() {
     pages: Page[],
     allSections: Record<string, Section[]>,
     screenshotMap: Record<string, string> = {},
-    includeScreenshots = false
+    includeScreenshots = false,
+    targets: ExportTargets = { tools: ['bolt'], outputs: ['react'] },
   ) => {
     setExporting(true);
     try {
@@ -41,7 +43,19 @@ export function useExport() {
       const activeScreenshotMap = includeScreenshots ? screenshotMap : {};
       const hasScreenshots = includeScreenshots && Object.values(screenshotMap).some(Boolean);
 
-      zip.file('prompt.txt', getMasterPrompt(hasScreenshots));
+      // One first-message prompt per selected AI builder
+      const pkg = {
+        projectName: project.name,
+        hasDesign: !!project.design_md,
+        hasPrototype: pages.some(p => p.generated_html),
+        hasChanges: pages.some(p => p.generated_html || readChanges(p).length),
+        hasCopy: pages.some(p => p.copy_md),
+        hasImages: pages.some(p => p.images_md),
+        hasScreenshots,
+        pages: pages.map(p => p.page_name),
+      };
+      const promptTargets: ExportTargets = combos(targets).length ? targets : { tools: ['bolt'], outputs: ['react'] };
+      for (const c of combos(promptTargets)) zip.file(promptFileName(c.tool, c.output), buildBuilderPrompt(c.tool, c.output, pkg));
 
       if (project.design_md) {
         zip.file('design.md', project.design_md);
@@ -87,7 +101,7 @@ URL: ${project.url}
 Date: ${new Date().toISOString().split('T')[0]}
 
 ## Files
-- prompt.txt — Master instructions for the AI
+${readmePromptLines(promptTargets)}
 - design.md — Complete design system (colors, fonts, spacing, components)
 ${multiPage
   ? pages.map(p => `- blueprint-${p.slug}.md — ${p.page_name} page structure`).join('\n')
@@ -115,7 +129,7 @@ ${screenshotPages.length > 0
 
 ## How to Use
 1. Open your AI tool of choice
-2. Copy the contents of prompt.txt as your opening message
+2. Paste the matching prompt-<tool>-<output>.txt as your first message
 3. Attach design.md, the blueprint.md file(s) and — if present — copy.md, images.md, prototype.html and changes.md
 ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual reference\n5. Hit send and review the output' : '4. Hit send and review the output'}
 `;
@@ -154,4 +168,3 @@ ${screenshotPages.length > 0 ? '4. Attach screenshot file(s) for visual referenc
 
   return { exportZip, downloadFile, copyToClipboard, exporting };
 }
-
