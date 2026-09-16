@@ -175,6 +175,23 @@ export function elementHtml(doc: Document, key: string): string {
   return copy.outerHTML;
 }
 
+/** Short description of the selected element and where it sits (for the AI chat). */
+export function elementContext(doc: Document, key: string): string {
+  const el = doc.querySelector(`[data-bpm-k="${CSS.escape(key)}"]`);
+  if (!el) return '';
+  const desc = (e: Element) => `<${e.tagName.toLowerCase()}${e.className ? ` class="${String(e.className).trim().slice(0, 60)}"` : ''}>`;
+  const lines: string[] = [];
+  const parent = el.parentElement;
+  if (parent && parent !== doc.body) {
+    const same = [...parent.children].filter(c => c.tagName === el.tagName && c.className === el.className).length;
+    lines.push(`Inside: ${desc(parent)} which holds ${parent.children.length} element(s)${same > 1 ? `, ${same} of them like the selected one (e.g. slides/cards/items)` : ''}.`);
+  }
+  lines.push(`Contains: ${el.querySelectorAll('img').length} image(s), ${el.children.length} direct child element(s).`);
+  const html = elementHtml(doc, key).replace(/\s+/g, ' ');
+  lines.push(`HTML (start): ${html.slice(0, 2500)}${html.length > 2500 ? ' …' : ''}`);
+  return lines.join('\n');
+}
+
 /** Cleaned nodes for an AI replacement, or null when it isn't a safe element-level fragment. */
 function parseReplacement(doc: Document, html: string): Node[] | null {
   if (/<\s*(html|head|body)[\s>]/i.test(html)) return null;

@@ -6,8 +6,9 @@
 // - Generate / Regenerate (with feedback) using useGenerateHtml
 // - "Edit on page": click an element to edit its text, image or link, or delete
 //   it; Undo (lib/visualEdit + VisualEditBar)
-// - "Describe changes": a quick AI check first (lib/changeCheck) — asks up to
-//   4 questions when the request is unclear, then applies it
+// - "Describe changes" and "Change with AI": a short chat first (lib/changeChat +
+//   ChangeChat) — the AI says what it will do, warns, asks up to 4 questions;
+//   nothing changes until "Yes, do it" (optional: skip for clear requests)
 // - Live iframe preview (sandboxed: the prototype's own scripts run so sliders,
 //   tabs etc. work, but without same-origin access to the app)
 // - Compare mode: original screenshot side-by-side with the generated HTML
@@ -26,13 +27,13 @@ import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
 import { jobStore } from '../../lib/jobStore';
 import { previewSource, stampHtml, isPreviewOutdated } from '../../lib/previewStamp';
-import { checkChanges, withAnswers } from '../../lib/changeCheck';
+import { chatTurn, buildRequest, readAutoApply, type ChatMessage, type ChatTurn } from '../../lib/changeChat';
 import type { CopyQuestion } from '../../lib/copywriter';
-import { QuestionCard } from './QuestionCard';
+import { ChangeChat } from './ChangeChat';
 import { VisualEditBar } from './VisualEditBar';
 import { changeElement, pageCss, MAX_ELEMENT_CHARS } from '../../lib/elementChange';
 import {
-  applyEdit, editorFrameHtml, elementHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
+  applyEdit, editorFrameHtml, elementContext, elementHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
   type EditOp, type Selection,
 } from '../../lib/visualEdit';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
@@ -62,8 +63,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const [viewport, setViewport] = useState<Viewport>('desktop');
   const [copied, setCopied] = useState(false);
   const [localStatus, setLocalStatus] = useState('');
-  // Questions about the current change request (null = not asked yet)
-  const [questions, setQuestions] = useState<CopyQuestion[] | null>(null);
+  // Chat with the AI about the current change (null = none open)
+  const [chat, setChat] = useState<ChatState | null>(null);
+  const chatAbort = useRef<AbortController | null>(null);
   const lastKey = `bpm_lastchange_${page.id}`;
   const [lastRequest, setLastRequest] = useState(() => {
     try { return localStorage.getItem(lastKey) ?? ''; } catch { return ''; }
@@ -127,6 +129,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   };
 
   const stopEditing = () => {
+    if (chat?.mode === 'element') closeChat();
     flushSave();
     setEditMode(false);
     setSelection(null);
@@ -152,11 +155,73 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
 
-  // ── Change the selected element with AI (quick check → optional questions → change) ──
-  const [elementAsk, setElementAsk] = useState<{ key: string; label: string; request: string; questions: CopyQuestion[] } | null>(null);
-  useEffect(() => { setElementAsk(a => (a && a.key !== selection?.key ? null : a)); }, [selection?.key]);
+  // ── Chat before a change (page: Describe changes · element: Change with AI) ──
+  const closeChat = () => {
+    chatAbort.current?.abort();
+    chatAbort.current = null;
+    setChat(null);
+  };
 
-  const runElementChange = async (key: string, request: string) => {
+  const runTurn = async (base: ChatState, messages: ChatMessage[]) => {
+    chatAbort.current?.abort();
+    const ctrl = new AbortController();
+    chatAbort.current = ctrl;
+    setChat({ ...base, messages, turn: null, busy: true });
+    let turn: ChatTurn;
+    try {
+      turn = await chatTurn(
+        appSettings.aiProvider ?? 'anthropic',
+        base.mode === 'page'
+          ? { kind: 'page', sections }
+          : { kind: 'element', label: base.label ?? '', context: base.context ?? '' },
+        messages,
+        ctrl.signal,
+      );
+    } catch {
+      if (ctrl.signal.aborted) return;
+      turn = { reply: 'I couldn’t check this request right now. Click “Yes, do it” to apply it as written, or send your message again.', warning: '', questions: [], clear: false };
+    }
+    if (chatAbort.current !== ctrl) return;
+    chatAbort.current = null;
+    const next: ChatState = { ...base, messages: [...messages, { role: 'ai', text: turn.reply }], turn, busy: false };
+    setChat(next);
+    if (turn.clear && readAutoApply()) confirmChat(next, [], {});
+  };
+
+  const confirmChat = (state: ChatState, qs: CopyQuestion[], answers: Record<string, string>) => {
+    const request = buildRequest(state.messages, qs, answers);
+    const plan = [...state.messages].reverse().find(m => m.role === 'ai')?.text ?? '';
+    const first = state.messages.find(m => m.role === 'user')?.text ?? '';
+    if (state.mode === 'page') void runGenerate(true, request, plan, first);
+    else if (state.key) void runElementChange(state.key, request, plan);
+  };
+
+  // Selecting the surrounding element (e.g. after "click Parent") keeps the chat going.
+  const prevSelKey = useRef<string | null>(null);
+  useEffect(() => {
+    const prevKey = prevSelKey.current;
+    prevSelKey.current = selection?.key ?? null;
+    const c = chat;
+    if (!c || c.mode !== 'element' || !selection || selection.key === c.key || c.busy) {
+      if (c && c.mode === 'element' && !selection) closeChat();
+      return;
+    }
+    const doc = docRef.current;
+    const oldEl = doc?.querySelector(`[data-bpm-k="${CSS.escape(c.key ?? '')}"]`);
+    const newEl = doc?.querySelector(`[data-bpm-k="${CSS.escape(selection.key)}"]`);
+    if (doc && oldEl && newEl && newEl.contains(oldEl) && prevKey !== selection.key) {
+      const label = selectionLabel(selection);
+      void runTurn(
+        { ...c, key: selection.key, label, context: elementContext(doc, selection.key) },
+        [...c.messages, { role: 'user', text: `(I have now selected the surrounding element instead: ${label}.)` }],
+      );
+    } else {
+      closeChat();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection?.key]);
+
+  const runElementChange = async (key: string, request: string, plan = '') => {
     const doc = docRef.current;
     if (!doc) return;
     const current = elementHtml(doc, key);
@@ -164,7 +229,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     const controller = new AbortController();
     const jobId = jobStore.start({
       kind: 'generate',
-      title: 'Changing the selected element…',
+      title: plan ? `Changing: ${plan.length > 90 ? `${plan.slice(0, 90)}…` : plan}` : 'Changing the selected element…',
       estimate: 'Usually 10–40 seconds',
       cancel: () => controller.abort(),
     });
@@ -183,7 +248,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         toast('The AI answer could not be used — please try again or rephrase.', 'error');
         return;
       }
-      setElementAsk(null);
+      closeChat();
       loadIntoEditor(htmlRef.current); // reload so new scripts run
       ding();
       toast('Element changed. Not right? Click Undo.', 'success');
@@ -196,36 +261,18 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     }
   };
 
-  const handleElementAI = async (request: string) => {
+  const handleElementAI = (request: string) => {
     const sel = selectionRef.current;
     const doc = docRef.current;
     if (!sel || !doc || !hasKey) return;
-    const current = elementHtml(doc, sel.key);
-    if (current.length > MAX_ELEMENT_CHARS) {
+    if (elementHtml(doc, sel.key).length > MAX_ELEMENT_CHARS) {
       toast('This element is too large for a quick change — select a smaller part, or use Describe changes.', 'warning');
       return;
     }
-    const label = `<${sel.tag}>${sel.text ? ` "${sel.text.slice(0, 40)}"` : ''}`;
-    const jobId = jobStore.start({ kind: 'generate', title: 'Checking your request…', estimate: 'A few seconds' });
-    if (jobId === null) return;
-    let qs: CopyQuestion[] = [];
-    try {
-      qs = await checkChanges(
-        appSettings.aiProvider ?? 'anthropic',
-        `${request}\n\n(This applies to ONE element the reviewer already selected: ${label}. Do not ask which element or section.)`,
-        [],
-      );
-    } catch {
-      qs = [];
-    } finally {
-      jobStore.finish(jobId);
-    }
-    if (jobStore.isCancelled(jobId)) return;
-    if (qs.length > 0) {
-      setElementAsk({ key: sel.key, label, request, questions: qs });
-      return;
-    }
-    void runElementChange(sel.key, request);
+    void runTurn(
+      { mode: 'element', key: sel.key, label: selectionLabel(sel), context: elementContext(doc, sel.key), messages: [], turn: null, busy: false },
+      [{ role: 'user', text: request }],
+    );
   };
 
   const undo = () => {
@@ -280,52 +327,37 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (jobRef.current !== null) jobStore.update(jobRef.current, localStatus || gen.status);
   }, [localStatus, gen.status]);
 
-  const runGenerate = async (isRegenerate: boolean, request = '') => {
+  const runGenerate = async (isRegenerate: boolean, request = '', plan = '', label = '') => {
     if (!hasKey || !hasSections) return;
     if (!isRegenerate && hasManualEdits(htmlRef.current) &&
         !window.confirm('Generate Fresh builds a new prototype from the sections and discards the edits you made on the page. (You can Undo afterwards.) Continue?')) return;
     if (editMode) stopEditing();
     const jobId = jobStore.start({
       kind: 'generate',
-      title: isRegenerate ? 'Applying your changes…' : 'Generating the prototype…',
+      title: isRegenerate
+        ? (plan ? `Applying: ${plan.length > 90 ? `${plan.slice(0, 90)}…` : plan}` : 'Applying your changes…')
+        : 'Generating the prototype…',
       estimate: 'Usually 2–4 minutes',
       cancel: gen.cancel,
     });
     if (jobId === null) return;
     jobRef.current = jobId;
     try {
-      await generateNow(isRegenerate, jobId, request);
+      await generateNow(isRegenerate, jobId, request, label);
     } finally {
       jobStore.finish(jobId);
       jobRef.current = null;
     }
   };
 
-  // "Apply Changes": quick check first; questions only when the request is unclear.
-  const handleApply = async () => {
+  // "Apply Changes": the AI replies first (chat); nothing changes until "Yes, do it".
+  const handleApply = () => {
     const request = feedback.trim();
     if (!request || !hasKey || !hasSections) return;
-    const jobId = jobStore.start({ kind: 'generate', title: 'Checking your request…', estimate: 'A few seconds' });
-    if (jobId === null) return;
-    let qs: CopyQuestion[] = [];
-    let failed = false;
-    try {
-      qs = await checkChanges(appSettings.aiProvider ?? 'anthropic', request, sections);
-    } catch {
-      failed = true;
-    } finally {
-      jobStore.finish(jobId);
-    }
-    if (jobStore.isCancelled(jobId)) return;
-    if (qs.length > 0) {
-      setQuestions(qs);
-      return;
-    }
-    if (failed) toast('Could not check the request — applying it as written.', 'warning');
-    void runGenerate(true, request);
+    void runTurn({ mode: 'page', messages: [], turn: null, busy: false }, [{ role: 'user', text: request }]);
   };
 
-  const generateNow = async (isRegenerate: boolean, jobId: number, request: string) => {
+  const generateNow = async (isRegenerate: boolean, jobId: number, request: string, label = '') => {
     // Prepare screenshot slices as visual reference (best effort)
     let slices: string[] = [];
     if (screenshot) {
@@ -353,8 +385,8 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       setHtml(stamped);
       onHtmlSaved(page.id, stamped);
       setFeedback('');
-      setQuestions(null);
-      saveLastRequest(isRegenerate ? request.trim().split('\n\nDetails:')[0] : '');
+      if (isRegenerate) closeChat();
+      saveLastRequest(isRegenerate ? (label || request).trim() : '');
       ding();
       if (result.truncated) {
         toast('Output hit the token limit — bottom sections may be missing. Try regenerating or simplify the blueprint.', 'warning');
@@ -509,25 +541,24 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             onDeselect={() => post({ type: 'deselect' })}
             onUndo={undo}
             onDone={stopEditing}
-            onAI={hasKey ? request => void handleElementAI(request) : undefined}
+            onAI={hasKey ? handleElementAI : undefined}
           >
-            {elementAsk && elementAsk.key === selection?.key && (
-              <QuestionCard
-                key={elementAsk.request}
-                title={`A few quick questions before changing ${elementAsk.label}`}
-                questions={elementAsk.questions}
-                submitLabel="Change with these answers"
-                disabled={isBusy}
-                onSubmit={answers => void runElementChange(elementAsk.key, withAnswers(elementAsk.request, elementAsk.questions, answers))}
-                onSkip={() => void runElementChange(elementAsk.key, elementAsk.request)}
-                onCancel={() => setElementAsk(null)}
+            {chat?.mode === 'element' && chat.key === selection?.key && (
+              <ChangeChat
+                title={`Change ${chat.label ?? 'this element'} with AI`}
+                messages={chat.messages}
+                turn={chat.turn}
+                busy={chat.busy || isBusy}
+                onReply={text => void runTurn(chat, [...chat.messages, { role: 'user', text }])}
+                onConfirm={(qs, answers) => confirmChat(chat, qs, answers)}
+                onCancel={closeChat}
               />
             )}
           </VisualEditBar>
         )}
 
         {/* Feedback / regenerate row */}
-        {html && !editMode && lastRequest && !questions && (
+        {html && !editMode && lastRequest && !chat && (
           <p className="text-[11px] text-[#6B7280] truncate" title={lastRequest}>
             <span className="font-medium text-[#374151]">Last change applied:</span> {lastRequest}
           </p>
@@ -536,16 +567,16 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
           <div className="flex items-start gap-2">
             <textarea
               value={feedback}
-              onChange={e => { setFeedback(e.target.value); setQuestions(null); }}
-              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && feedback.trim() && !isBusy) { e.preventDefault(); void handleApply(); } }}
+              onChange={e => { setFeedback(e.target.value); if (chat?.mode === 'page') closeChat(); }}
+              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && feedback.trim() && !isBusy) { e.preventDefault(); handleApply(); } }}
               rows={2}
               placeholder='Describe changes, e.g. "Make the hero taller, turn the gallery into a slider, lighter gray for section 3 background"'
               disabled={isBusy}
               className="flex-1 bg-white border border-[#E5E7EB] rounded-none px-3 py-2 text-sm text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all disabled:opacity-50 resize-y leading-snug"
             />
             <button
-              onClick={() => void handleApply()}
-              disabled={!feedback.trim() || isBusy || !!questions}
+              onClick={handleApply}
+              disabled={!feedback.trim() || isBusy || chat?.mode === 'page'}
               title="Ctrl/⌘ + Enter"
               className="flex items-center gap-1.5 px-4 py-2 bg-[#F9FAFB] hover:bg-white border border-[#E5E7EB] hover:border-[#2575FC] text-sm text-[#111827] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
@@ -553,15 +584,15 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             </button>
           </div>
         )}
-        {html && !editMode && questions && questions.length > 0 && (
-          <QuestionCard
-            title="A few quick questions before the page is rebuilt"
-            questions={questions}
-            submitLabel="Apply with these answers"
-            disabled={isBusy}
-            onSubmit={answers => void runGenerate(true, withAnswers(feedback, questions, answers))}
-            onSkip={() => void runGenerate(true, feedback.trim())}
-            onCancel={() => setQuestions(null)}
+        {html && !editMode && chat?.mode === 'page' && (
+          <ChangeChat
+            title="Before the page is rebuilt (2–4 minutes, ≈ $0.30)"
+            messages={chat.messages}
+            turn={chat.turn}
+            busy={chat.busy || isBusy}
+            onReply={text => void runTurn(chat, [...chat.messages, { role: 'user', text }])}
+            onConfirm={(qs, answers) => confirmChat(chat, qs, answers)}
+            onCancel={closeChat}
           />
         )}
 
@@ -638,4 +669,19 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       </div>
     </div>
   );
+}
+
+interface ChatState {
+  mode: 'page' | 'element';
+  /** element mode: the selected element */
+  key?: string;
+  label?: string;
+  context?: string;
+  messages: ChatMessage[];
+  turn: ChatTurn | null;
+  busy: boolean;
+}
+
+function selectionLabel(sel: Selection): string {
+  return `<${sel.tag}>${sel.text ? ` "${sel.text.slice(0, 40)}"` : ''}`;
 }
