@@ -17,6 +17,7 @@ import { ExportPanel } from '../components/Export/ExportPanel';
 import { PreviewPanel } from '../components/Editor/PreviewPanel';
 import { previewSource, isPreviewOutdated } from '../lib/previewStamp';
 import { usePrototypeSync } from '../hooks/usePrototypeSync';
+import { syncStatus } from '../lib/syncStatus';
 import { PresetGuide } from '../components/Editor/PresetGuide';
 import { ProcessingOverlay } from '../components/ui/ProcessingOverlay';
 import { GuidedEditor } from '../components/Editor/GuidedEditor';
@@ -320,6 +321,10 @@ export function EditorPage({ user }: EditorPageProps) {
   // Default: Guided for projects created with a workflow, Advanced for older/manual ones.
   const guided = (savedMode ?? (project.preset && project.preset !== 'manual' ? 'guided' : 'advanced')) === 'guided';
 
+  // Dot on the Preview tab: green = prototype in sync, amber = outdated
+  const activePageForStatus = pages.find(p => p.id === activePageId);
+  const protoState = activePageForStatus ? syncStatus(project, activePageForStatus, sections).prototype : 'none';
+
   const panelButtons: { id: ActivePanel; icon: typeof Layers; label: string }[] = [
     { id: 'sections', icon: Layers, label: 'Sections' },
     { id: 'design', icon: FileText, label: 'Design' },
@@ -368,7 +373,15 @@ export function EditorPage({ user }: EditorPageProps) {
                 title={label}
                 className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 text-[9px] font-medium transition-all min-w-0 ${activePanel === id ? 'bg-white text-[#2575FC] border-t border-l border-r border-[#E5E7EB] -mb-px relative z-10' : 'text-[#9CA3AF] hover:text-[#111827]'}`}
               >
-                <Icon className="w-3 h-3 shrink-0" />
+                <span className="relative">
+                  <Icon className="w-3 h-3 shrink-0" />
+                  {id === 'preview' && protoState !== 'none' && (
+                    <span
+                      title={protoState === 'current' ? 'Prototype is in sync' : 'Prototype is outdated'}
+                      className={`absolute -top-1 -right-1.5 w-1.5 h-1.5 rounded-full ${protoState === 'current' ? 'bg-green-600' : 'bg-amber-500'}`}
+                    />
+                  )}
+                </span>
                 <span className="truncate w-full text-center leading-none">{label}</span>
               </button>
             ))}

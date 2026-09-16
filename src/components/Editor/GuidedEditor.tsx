@@ -9,7 +9,6 @@
 // ExportPanel, CreatePanel) — no AI or data logic lives here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { previewSource, isPreviewOutdated } from '../../lib/previewStamp';
 import type { ReactNode } from 'react';
 import { Check, Lock, ArrowLeft, ArrowRight, Plus, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { ImportPanel } from './ImportPanel';
@@ -22,9 +21,11 @@ import { getPreset } from '../../lib/presets';
 import { checkFabrication } from '../../lib/pageAssets';
 import { AI_COPY_MARKER } from '../../lib/presets';
 import { findPlaceholders } from '../../lib/copywriter';
+import { syncStatus } from '../../lib/syncStatus';
 import type { AppSettings, GlobalSettings, Page, Project, Section } from '../../types';
 
 type StepId = 'content' | 'design' | 'review' | 'prototype' | 'export';
+interface Badge { tone: 'green' | 'amber'; text: string }
 
 const STEP_LABELS: Record<StepId, { title: string; sub: string }> = {
   content: { title: 'Content', sub: 'Get the page text' },
@@ -87,12 +88,27 @@ export function GuidedEditor(props: GuidedEditorProps) {
   const [reviewed, setReviewed] = useState(() => readReviewed(page.id));
   useEffect(() => { setReviewed(readReviewed(page.id)); }, [page.id]);
 
+  const sync = syncStatus(project, page, sections);
   const done: Record<StepId, boolean> = {
     content: sections.length > 0,
     design: !!project.design_md?.trim(),
     review: reviewed,
-    prototype: !!page.generated_html && !isPreviewOutdated(page.generated_html, previewSource(project.design_md, project.globals, sections)),
+    prototype: sync.prototype === 'current',
     export: false,
+  };
+
+  // Small status pills on the step bar
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const badges: Partial<Record<StepId, Badge>> = {
+    content: pendingText ? { tone: 'amber', text: 'Text not built yet' } : undefined,
+    prototype: sync.prototype === 'outdated'
+      ? { tone: 'amber', text: 'Outdated — update it' }
+      : sync.prototype === 'current'
+        ? { tone: 'green', text: sync.changes ? `In sync · ${plural(sync.changes, 'change')}` : 'In sync' }
+        : undefined,
+    export: sync.prototype === 'outdated'
+      ? { tone: 'amber', text: 'Prototype outdated' }
+      : sync.prototype === 'current' ? { tone: 'green', text: 'Ready' } : undefined,
   };
 
   // A step opens when it is already done, or when every step before it is done.
@@ -173,6 +189,14 @@ export function GuidedEditor(props: GuidedEditorProps) {
                   {locked && <Lock className="w-3 h-3" />}
                 </span>
                 <span className="block text-[11px] text-[#9CA3AF] truncate">{STEP_LABELS[id].sub}</span>
+                {badges[id] && (
+                  <span
+                    className={`mt-1 inline-flex items-center gap-1 px-1.5 py-px text-[10px] font-medium border max-w-full truncate ${badges[id]!.tone === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-green-50 border-green-200 text-green-700'}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badges[id]!.tone === 'amber' ? 'bg-amber-500' : 'bg-green-600'}`} />
+                    {badges[id]!.text}
+                  </span>
+                )}
               </span>
             </button>
           );
@@ -185,7 +209,14 @@ export function GuidedEditor(props: GuidedEditorProps) {
         {step === 'design' && <DesignStep {...props} n={current + 1} />}
         {step === 'review' && <ReviewStep {...props} n={current + 1} />}
         {step === 'prototype' && <PrototypeStep {...props} n={current + 1} />}
-        {step === 'export' && <ExportStep {...props} n={current + 1} />}
+        {step === 'export' && (
+          <ExportStep
+            {...props}
+            n={current + 1}
+            outdated={sync.prototype === 'outdated'}
+            onGoPrototype={() => { userMoved.current = true; setCurrent(order.indexOf('prototype')); scrollTop(); }}
+          />
+        )}
 
         {/* Back / Next */}
         <div className="flex items-center justify-between gap-3 border-t border-[#E5E7EB] bg-[#F9FAFB] px-6 py-3.5">
@@ -561,7 +592,7 @@ function PrototypeStep(p: StepProps) {
 // 5. Export
 // ---------------------------------------------------------------------------
 
-function ExportStep(p: StepProps) {
+function ExportStep(p: StepProps & { outdated: boolean; onGoPrototype: () => void }) {
   return (
     <>
       <StepHeader
@@ -570,6 +601,17 @@ function ExportStep(p: StepProps) {
         title="Download everything"
         lead="One ZIP with all the files an AI builder needs to rebuild the site — for Bolt, Claude, Lovable and others."
       />
+      {p.outdated && (
+        <div className="mx-6 mt-4 flex items-center gap-3 flex-wrap bg-amber-50 border border-amber-200 px-4 py-3">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <p className="text-xs text-amber-800 flex-1 min-w-[220px]">
+            <b>The prototype is outdated.</b> The sections or the design changed after it was made, so <b>prototype.html</b> in the ZIP still shows the old version. Update it first.
+          </p>
+          <button onClick={p.onGoPrototype} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium shrink-0">
+            Go to Prototype
+          </button>
+        </div>
+      )}
       <div className="px-6 py-5 grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5">
         <div className="border border-[#E5E7EB] min-w-0">
           <ExportPanel

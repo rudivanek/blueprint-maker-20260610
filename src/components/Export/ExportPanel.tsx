@@ -5,6 +5,7 @@ import { useExport } from '../../hooks/useExport';
 import { generateBlueprintMd, getMasterPrompt } from '../../lib/prompts';
 import { ding } from '../../lib/ding';
 import { checkFabrication } from '../../lib/pageAssets';
+import { syncStatus } from '../../lib/syncStatus';
 
 interface ExportPanelProps {
   project: Project;
@@ -57,6 +58,12 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
   const blueprintPreview = activePage ? generateBlueprintMd(project.globals, activePage, activeSections) : '';
   const promptPreview = getMasterPrompt(includeScreenshots && hasAnyScreenshot);
 
+  // Pages whose prototype no longer matches their sections / the design (only pages whose sections are loaded)
+  const outdatedPages = pages.filter(pg => {
+    const secs = pg.id === activePage?.id ? activeSections : allSections[pg.id];
+    return !!secs && syncStatus(project, pg, secs).prototype === 'outdated';
+  });
+
   return (
     <div className="h-full overflow-auto px-4 py-5 space-y-4">
       <div>
@@ -87,6 +94,15 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
             )}
           </div>
         </label>
+
+        {outdatedPages.length > 0 && (
+          <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-800">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span>
+              Outdated prototype: <b>{outdatedPages.map(pg => pg.page_name).join(', ')}</b>. Its prototype.html shows the old content — update it in Preview first.
+            </span>
+          </div>
+        )}
 
         <p className="text-[#9CA3AF] text-[10px] text-center mt-2">
           prompt.txt + design.md + blueprint.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{pages.some(p => p.generated_html) ? ' + prototype.html + changes.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
@@ -222,4 +238,3 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
     </div>
   );
 }
-
