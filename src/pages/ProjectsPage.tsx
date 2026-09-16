@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Globe, Clock, Trash2, Loader2, FolderOpen, ArrowRight, ArrowLeft, Upload, CheckCircle, X, Copy } from 'lucide-react';
+import { Plus, Globe, Clock, Trash2, Loader2, FolderOpen, ArrowRight, ArrowLeft, Upload, CheckCircle, X, Copy, Pencil } from 'lucide-react';
 import { useProjects } from '../hooks/useProjects';
 import { PRESETS, getPreset } from '../lib/presets';
 import type { ProjectPreset } from '../types';
@@ -12,7 +12,9 @@ interface ProjectsPageProps {
 
 export function ProjectsPage({ user }: ProjectsPageProps) {
   const navigate = useNavigate();
-  const { projects, loading, error: projectsError, createProject, deleteProject, duplicateProject } = useProjects(user.id);
+  const { projects, loading, error: projectsError, createProject, updateProject, deleteProject, duplicateProject } = useProjects(user.id);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [preset, setPreset] = useState<ProjectPreset | null>(null);
@@ -93,6 +95,22 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
     setDuplicatingId(id);
     await duplicateProject(id);
     setDuplicatingId(null);
+  };
+
+  const startRename = (e: React.MouseEvent, id: string, name: string) => {
+    e.stopPropagation();
+    setRenamingId(id);
+    setRenameValue(name);
+  };
+
+  const saveRename = async () => {
+    const id = renamingId;
+    if (!id) return;
+    setRenamingId(null);
+    const name = renameValue.trim();
+    const old = projects.find(p => p.id === id)?.name;
+    if (!name || name === old) return;
+    await updateProject(id, { name });
   };
 
   const formatDate = (dateStr: string) => {
@@ -179,7 +197,31 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
                   <div className="p-3 flex flex-col flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-[#111827] font-medium text-sm truncate" title={project.name}>{project.name}</h3>
+                        {renamingId === project.id ? (
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            onFocus={e => e.target.select()}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { e.preventDefault(); void saveRename(); }
+                              if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); }
+                            }}
+                            onBlur={() => void saveRename()}
+                            maxLength={120}
+                            aria-label="Project name"
+                            className="w-full bg-white border border-[#2575FC] px-1.5 py-0.5 text-sm font-medium text-[#111827] focus:outline-none"
+                          />
+                        ) : (
+                          <h3
+                            className="text-[#111827] font-medium text-sm truncate"
+                            title={`${project.name} — double-click to rename`}
+                            onDoubleClick={e => startRename(e, project.id, project.name)}
+                          >
+                            {project.name}
+                          </h3>
+                        )}
                         {domain && (
                           <p className="text-[#9CA3AF] text-[11px] mt-0.5 truncate flex items-center gap-1">
                             <Globe className="w-3 h-3 shrink-0" />
@@ -187,6 +229,13 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
                           </p>
                         )}
                       </div>
+                      <button
+                        onClick={e => startRename(e, project.id, project.name)}
+                        title="Rename project"
+                        className="opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center justify-center text-[#9CA3AF] hover:text-[#2575FC] hover:bg-[#EFF5FF] transition-all shrink-0"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={e => handleDuplicate(e, project.id)}
                         disabled={duplicatingId !== null}
@@ -356,5 +405,3 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
     </div>
   );
 }
-
-

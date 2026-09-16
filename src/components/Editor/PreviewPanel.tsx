@@ -4,8 +4,8 @@
 // when the "Preview" tab is active.
 //
 // - Generate / Regenerate (with feedback) using useGenerateHtml
-// - Live iframe preview (sandboxed, no scripts — matches the master prompt's
-//   "no JavaScript" rule)
+// - Live iframe preview (sandboxed: the prototype's own scripts run so sliders,
+//   tabs etc. work, but without same-origin access to the app)
 // - Compare mode: original screenshot side-by-side with the generated HTML
 // - Viewport toggle: desktop / tablet / mobile widths
 // - Download as standalone .html / copy to clipboard
@@ -303,7 +303,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
               <iframe
                 title="Generated prototype"
                 srcDoc={html}
-                sandbox=""
+                sandbox="allow-scripts"
                 className="w-full flex-1 border-0 bg-white"
               />
             </div>
@@ -313,7 +313,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             <iframe
               title="Generated prototype"
               srcDoc={html}
-              sandbox=""
+              sandbox="allow-scripts"
               style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: '100%' }}
               className="h-full border-0 bg-white shadow-sm transition-all"
             />

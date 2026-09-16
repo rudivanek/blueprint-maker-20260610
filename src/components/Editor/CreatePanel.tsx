@@ -200,7 +200,7 @@ export function CreatePanel({ provider, anthropicKey, openaiKey, initialBrief = 
                   </button>
                 </div>
               </div>
-              <iframe srcDoc={generatedHtml} sandbox="allow-scripts allow-same-origin"
+              <iframe srcDoc={generatedHtml} sandbox="allow-scripts"
                 title="Generated page preview" className="w-full border-0 bg-white" style={{ height: '400px' }} />
             </div>
           )}

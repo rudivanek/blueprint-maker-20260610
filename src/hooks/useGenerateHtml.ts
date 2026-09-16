@@ -13,6 +13,7 @@
 import { useState, useRef } from 'react';
 import { generateBlueprintMd, getMasterPrompt, getScratchPrompt } from '../lib/prompts';
 import { dataUriParts } from '../lib/screenshot';
+import { makeInteractive } from '../lib/interactivePrompt';
 import { generateText, type Purpose } from '../lib/aiProxy';
 import type { GlobalSettings, Page, Section, AIProvider } from '../types';
 
@@ -66,7 +67,7 @@ You previously generated the HTML prototype included below. The reviewer request
 === REQUESTED CHANGES ===
 ${args.feedback}
 
-Apply ONLY these changes. Keep every other section, layout decision, color, and piece of copy EXACTLY as it is in the previous version. Return the complete updated standalone HTML document — never a diff or fragment.
+Apply ONLY these changes. If a change asks for an interactive element (slider, gallery, tabs, accordion, menu, animation…), build it fully working with JavaScript as described in INTERACTIVE WIDGETS — never as a static picture. Keep every other section, layout decision, color, and piece of copy EXACTLY as it is in the previous version. Return the complete updated standalone HTML document — never a diff or fragment.
 
 === design.md ===
 ${args.designMd || '(no design.md provided — use the blueprint section colors and clean defaults)'}
@@ -154,7 +155,7 @@ export function useGenerateHtml(provider: AIProvider) {
 
     try {
       const screenshots = args.screenshots ?? [];
-      const systemPrompt = getMasterPrompt(screenshots.length > 0);
+      const systemPrompt = makeInteractive(getMasterPrompt(screenshots.length > 0));
       const userText = buildUserText(args);
 
       const onProgress = (chars: number) => {
@@ -206,7 +207,7 @@ export function useGenerateHtml(provider: AIProvider) {
     abortRef.current = controller;
 
     try {
-      const systemPrompt = getScratchPrompt();
+      const systemPrompt = makeInteractive(getScratchPrompt());
       const userText = `Build a complete standalone HTML page based on this creative brief and design system.
 
 === CREATIVE BRIEF ===
@@ -250,4 +251,3 @@ Return ONLY the complete HTML document, starting with <!DOCTYPE html>. No explan
 
   return { generate, generateFromScratch, cancel, generating, status, error };
 }
-
