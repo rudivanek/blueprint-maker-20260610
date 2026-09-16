@@ -10,12 +10,14 @@
 //   WordPress/Elementor path. Compact-mode re-import reuses the same slices.
 
 import { useState, useRef, useEffect } from 'react';
-import { ScanLine, Loader2, AlertCircle, CheckCircle, RefreshCw, Globe, FileText } from 'lucide-react';
+import { ScanLine, Loader2, AlertCircle, CheckCircle, RefreshCw, Globe, FileText, Sparkles } from 'lucide-react';
 import { useFirecrawl } from '../../hooks/useFirecrawl';
 import { useAI } from '../../hooks/useAI';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
 import { buildCopyMd, buildImagesMd } from '../../lib/pageAssets';
 import { contentToHtml, contentToCopyMd } from '../../lib/presets';
+import { CopyWriter } from './CopyWriter';
+import { findPlaceholders } from '../../lib/copywriter';
 import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
 import { jobStore } from '../../lib/jobStore';
@@ -33,18 +35,23 @@ interface ImportPanelProps {
   ) => void;
   onPageUrlChange: (url: string) => void;
   /** Step 4: which source tab is selected first */
-  initialSource?: 'url' | 'paste';
+  initialSource?: 'url' | 'paste' | 'write';
   /** Step 4: content written in the New Project wizard */
   initialContent?: string;
   pageName?: string;
+  /** "Write it for me": page id (to remember the description) and a starting description */
+  pageId?: string;
+  initialDescription?: string;
 }
 
 type ImportStatus = 'idle' | 'loading' | 'success' | 'error' | 'truncated';
 
-export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImported, onPageUrlChange, initialSource = 'url', initialContent = '', pageName = 'Page' }: ImportPanelProps) {
+export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImported, onPageUrlChange, initialSource = 'url', initialContent = '', pageName = 'Page', pageId = 'page', initialDescription = '' }: ImportPanelProps) {
   const [url, setUrl] = useState(pageUrl || projectUrl || '');
-  const [source, setSource] = useState<'url' | 'paste'>(initialSource);
+  const [source, setSource] = useState<'url' | 'paste' | 'write'>(initialSource);
   const [content, setContent] = useState(initialContent);
+  // true while the text in "Paste my content" was written by the AI
+  const [contentIsAi, setContentIsAi] = useState(false);
   const [isWordPress, setIsWordPress] = useState(false);
   const [structureStatus, setStructureStatus] = useState<ImportStatus>('idle');
   const [currentStatus, setCurrentStatus] = useState('');
@@ -178,7 +185,7 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     setCurrentStatus('Turning your content into sections...');
     try {
       const html = contentToHtml(content);
-      lastAssets.current = { copyMd: contentToCopyMd(content, pageName), imagesMd: '' };
+      lastAssets.current = { copyMd: contentToCopyMd(content, pageName, contentIsAi), imagesMd: '' };
       lastRawHtml.current = html;
       lastScreenshotSlices.current = [];
       lastScreenshotUrl.current = undefined;
@@ -216,10 +223,11 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5 mb-3">
+      <div className="grid grid-cols-3 gap-1.5 mb-3">
         {([
           { id: 'url' as const, icon: Globe, label: 'From URL' },
           { id: 'paste' as const, icon: FileText, label: 'Paste my content' },
+          { id: 'write' as const, icon: Sparkles, label: 'Write it for me' },
         ]).map(({ id, icon: Icon, label }) => (
           <button
             key={id}
@@ -233,7 +241,24 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
         ))}
       </div>
 
-      {source === 'url' ? (
+      {source === 'write' ? (
+        <CopyWriter
+          pageId={pageId}
+          provider={appSettings.aiProvider ?? 'anthropic'}
+          hasAIKey={hasAIKey}
+          initialDescription={initialDescription}
+          runJob={(title, estimate, fn) => withJob(title, estimate, fn)}
+          isCancelled={() => jobStore.isCancelled(jobRef.current)}
+          onWritten={md => {
+            setContent(md);
+            setContentIsAi(true);
+            setSource('paste');
+            setStructureStatus('idle');
+            setCurrentStatus('');
+            toast('The copy is written. Read and edit it, then click “Build Sections”.', 'success');
+          }}
+        />
+      ) : source === 'url' ? (
         <>
       <div className="mb-3">
         <input
@@ -296,13 +321,25 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
         <>
           <textarea
             value={content}
-            onChange={e => setContent(e.target.value)}
+            onChange={e => { setContent(e.target.value); if (!e.target.value.trim()) setContentIsAi(false); }}
             disabled={isLoading}
-            rows={10}
+            rows={contentIsAi ? 16 : 10}
             placeholder={'# Hero title\nSubtitle…\n\n## Services\n- Service one: description\n\n## Contact\n…'}
             className="w-full bg-white border border-[#E5E7EB] rounded-none px-3 py-2.5 text-xs font-mono leading-relaxed text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all disabled:opacity-50 resize-y mb-1"
           />
           <p className="text-[10px] text-[#9CA3AF] mb-3">Each # or ## heading starts a section. Your text is saved as copy.md and used word for word. No Firecrawl call.</p>
+          {contentIsAi && (() => {
+            const ph = findPlaceholders(content);
+            return (
+              <div className="flex items-start gap-2 bg-[#EFF5FF] border border-[#2575FC]/30 px-3 py-2 mb-3 text-xs text-[#1E3A8A]">
+                <Sparkles className="w-4 h-4 shrink-0 text-[#2575FC]" />
+                <span>
+                  Written by the AI from your description — read it and change anything you like.
+                  {ph.length > 0 && <> Replace the placeholders with real details: {ph.slice(0, 8).map(x => `[${x}]`).join(', ')}{ph.length > 8 ? '…' : ''}</>}
+                </span>
+              </div>
+            );
+          })()}
           {!hasAIKey && (
             <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 px-3 py-2.5 mb-3">
               <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
@@ -345,4 +382,3 @@ export function ImportPanel({ projectUrl, pageUrl, appSettings, onStructureImpor
     </div>
   );
 }
-

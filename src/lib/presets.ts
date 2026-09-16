@@ -208,8 +208,14 @@ export function contentToHtml(md: string): string {
   return `<!DOCTYPE html><html><body><main>${out.join('\n')}</main></body></html>`;
 }
 
-/** copy.md for user-written content: the text is the copy, verbatim. */
-export function contentToCopyMd(md: string, pageName: string): string {
-  return `# Copy — ${pageName}\nTexto escrito por el cliente. Úsalo tal cual; no lo reescribas ni inventes datos.\n\n${md.trim()}\n\n<!-- END OF COPY -->\n`;
+/** Marker line in copy.md when the text was written by the AI ("Write it for me"). */
+export const AI_COPY_MARKER = 'Texto escrito por IA a partir de la descripción del cliente.';
+
+/** copy.md for user-written (or AI-written) content: the text is the copy, verbatim. */
+export function contentToCopyMd(md: string, pageName: string, aiWritten = false): string {
+  const note = aiWritten
+    ? `${AI_COPY_MARKER} Úsalo tal cual; los [marcadores] entre corchetes deben reemplazarse con datos reales.`
+    : 'Texto escrito por el cliente. Úsalo tal cual; no lo reescribas ni inventes datos.';
+  return `# Copy — ${pageName}\n${note}\n\n${md.trim()}\n\n<!-- END OF COPY -->\n`;
 }
 

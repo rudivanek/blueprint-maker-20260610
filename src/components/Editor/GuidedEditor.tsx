@@ -2,7 +2,8 @@
 //
 // Guided mode: the editor as a step-by-step wizard.
 //   Content → Design → Review → Prototype → Export
-//   (Describe it myself: Design → Generate page)
+//   Content comes from a URL, from pasted text, or is written by the AI
+//   ("Write it for me" — the default for "Describe it myself").
 // Only the current step is shown. Each step reuses the existing panels
 // (ImportPanel, DesignSourcePanel, DesignPanel, SectionCard, PreviewPanel,
 // ExportPanel, CreatePanel) — no AI or data logic lives here.
@@ -15,13 +16,14 @@ import { DesignSourcePanel } from './DesignSourcePanel';
 import { DesignPanel } from './DesignPanel';
 import { SectionCard } from './SectionCard';
 import { PreviewPanel } from './PreviewPanel';
-import { CreatePanel } from './CreatePanel';
 import { ExportPanel } from '../Export/ExportPanel';
 import { getPreset } from '../../lib/presets';
 import { checkFabrication } from '../../lib/pageAssets';
+import { AI_COPY_MARKER } from '../../lib/presets';
+import { findPlaceholders } from '../../lib/copywriter';
 import type { AppSettings, GlobalSettings, Page, Project, Section } from '../../types';
 
-type StepId = 'content' | 'design' | 'review' | 'prototype' | 'export' | 'brief';
+type StepId = 'content' | 'design' | 'review' | 'prototype' | 'export';
 
 const STEP_LABELS: Record<StepId, { title: string; sub: string }> = {
   content: { title: 'Content', sub: 'Get the page text' },
@@ -29,8 +31,14 @@ const STEP_LABELS: Record<StepId, { title: string; sub: string }> = {
   review: { title: 'Review', sub: 'Check sections' },
   prototype: { title: 'Prototype', sub: 'Generate HTML' },
   export: { title: 'Export', sub: 'Download ZIP' },
-  brief: { title: 'Generate', sub: 'Page from your text' },
 };
+
+type ContentMode = 'url' | 'paste' | 'write';
+function contentModeFor(presetId: string | undefined): ContentMode {
+  if (presetId === 'content') return 'paste';
+  if (presetId === 'describe') return 'write';
+  return 'url';
+}
 
 interface GuidedEditorProps {
   project: Project;
@@ -66,11 +74,8 @@ function readReviewed(pageId: string): boolean {
 export function GuidedEditor(props: GuidedEditorProps) {
   const { project, page, sections } = props;
   const preset = getPreset(project.preset);
-  const isDescribe = preset?.id === 'describe';
 
-  const order: StepId[] = isDescribe
-    ? ['design', 'brief']
-    : ['content', 'design', 'review', 'prototype', 'export'];
+  const order: StepId[] = ['content', 'design', 'review', 'prototype', 'export'];
 
   const [reviewed, setReviewed] = useState(() => readReviewed(page.id));
   useEffect(() => { setReviewed(readReviewed(page.id)); }, [page.id]);
@@ -81,7 +86,6 @@ export function GuidedEditor(props: GuidedEditorProps) {
     review: reviewed,
     prototype: !!page.generated_html,
     export: false,
-    brief: false,
   };
 
   // A step opens when it is already done, or when every step before it is done.
@@ -123,7 +127,7 @@ export function GuidedEditor(props: GuidedEditorProps) {
   // Review never blocks; everything else needs its result first.
   const nextEnabled = step === 'review' || done[step];
   const whyBlocked: Partial<Record<StepId, string>> = {
-    content: 'Import the page (or build sections from your text) first.',
+    content: 'Get the page content first (import, paste or let the AI write it — then Build Sections).',
     design: 'Create or upload the design system first.',
     prototype: 'Generate the prototype first.',
   };
@@ -149,13 +153,9 @@ export function GuidedEditor(props: GuidedEditorProps) {
               onClick={() => { if (!locked) { userMoved.current = true; setCurrent(i); } }}
               disabled={locked}
               title={locked ? 'Finish the earlier steps first' : ''}
-              className={`flex-1 flex items-center gap-2.5 px-3.5 py-3 border text-left transition-colors -mt-px sm:mt-0 sm:-ml-px first:ml-0 first:mt-0 ${
-                isCurrent ? 'bg-[#EFF5FF] border-[#2575FC] relative z-10' : 'bg-white border-[#E5E7EB]'
-              } ${locked ? 'cursor-not-allowed' : 'hover:bg-[#F9FAFB]'}`}
+              className={`flex-1 flex items-center gap-2.5 px-3.5 py-3 border text-left transition-colors -mt-px sm:mt-0 sm:-ml-px first:ml-0 first:mt-0 ${isCurrent ? 'bg-[#EFF5FF] border-[#2575FC] relative z-10' : 'bg-white border-[#E5E7EB]'} ${locked ? 'cursor-not-allowed' : 'hover:bg-[#F9FAFB]'}`}
             >
-              <span className={`w-6 h-6 shrink-0 flex items-center justify-center text-xs font-semibold border ${
-                isDone ? 'bg-green-600 border-green-600 text-white' : isCurrent ? 'border-[#2575FC] text-[#2575FC]' : 'border-[#E5E7EB] text-[#9CA3AF]'
-              }`}>
+              <span className={`w-6 h-6 shrink-0 flex items-center justify-center text-xs font-semibold border ${isDone ? 'bg-green-600 border-green-600 text-white' : isCurrent ? 'border-[#2575FC] text-[#2575FC]' : 'border-[#E5E7EB] text-[#9CA3AF]'}`}>
                 {isDone ? <Check className="w-3.5 h-3.5" /> : i + 1}
               </span>
               <span className="min-w-0">
@@ -177,7 +177,6 @@ export function GuidedEditor(props: GuidedEditorProps) {
         {step === 'review' && <ReviewStep {...props} n={current + 1} />}
         {step === 'prototype' && <PrototypeStep {...props} n={current + 1} />}
         {step === 'export' && <ExportStep {...props} n={current + 1} />}
-        {step === 'brief' && <BriefStep {...props} n={current + 1} />}
 
         {/* Back / Next */}
         <div className="flex items-center justify-between gap-3 border-t border-[#E5E7EB] bg-[#F9FAFB] px-6 py-3.5">
@@ -201,7 +200,7 @@ export function GuidedEditor(props: GuidedEditorProps) {
               </button>
             </>
           )}
-          {isLast && !isDescribe && (
+          {isLast && (
             <span className="text-xs text-[#6B7280]">Next page? Use <b>+ Add Page</b> above — design and export stay shared.</span>
           )}
         </div>
@@ -261,23 +260,35 @@ function countImages(md?: string): number {
 
 function ContentStep(p: StepProps) {
   const preset = getPreset(p.project.preset);
-  const paste = preset?.importStart === 'paste';
+  const mode = contentModeFor(preset?.id);
   const restyle = preset?.id === 'restyle';
+  const texts: Record<ContentMode, { title: string; lead: ReactNode; what: string; need: string; time: string }> = {
+    url: {
+      title: "Import the page's content",
+      lead: <>The app reads the page and takes its <b>texts, images and layout</b>.{restyle ? ' The look will come from your design system, not from this site.' : ''} Check the address and click <b>Import This Page</b>. No website? Use <b>Paste my content</b> or <b>Write it for me</b>.</>,
+      what: 'The page is scraped and split into sections. All text is saved word for word (copy.md), all images are listed (images.md).',
+      need: 'The address of the page you want to rebuild.',
+      time: '1–3 minutes · 1 scrape + ≈ $0.20',
+    },
+    paste: {
+      title: 'Turn your text into page sections',
+      lead: <>Paste or edit your text below and click <b>Build Sections</b>. Every <code>#</code> or <code>##</code> heading becomes a section. Your words are used exactly as written.</>,
+      what: 'The AI turns your text into page sections (hero, services, contact…). Your text is saved as copy.md.',
+      need: 'Your text. Markdown helps: # headings, - lists.',
+      time: 'About 30 seconds · ≈ $0.05',
+    },
+    write: {
+      title: 'Let the AI write the page text',
+      lead: <>Describe the page in a few sentences and click <b>Write it for me</b>. If something important is missing, the AI asks up to 4 quick questions. Then read the text, change what you like, and click <b>Build Sections</b>.</>,
+      what: 'The AI writes the page copy (headings, sections, calls to action). Missing facts become [placeholders] — nothing is made up.',
+      need: 'A short description: business, audience, what the page should achieve.',
+      time: '≈ 1 minute · ≈ $0.06 to write + ≈ $0.05 to build sections',
+    },
+  };
+  const t = texts[mode];
   return (
     <>
-      <StepHeader
-        n={p.n}
-        name="Content"
-        title={paste ? 'Turn your text into page sections' : "Import the page's content"}
-        lead={paste
-          ? <>Paste or edit your text below and click <b>Build Sections</b>. Every <code>#</code> or <code>##</code> heading becomes a section. Your words are used exactly as written.</>
-          : <>The app reads the page and takes its <b>texts, images and layout</b>.{restyle ? ' The look will come from your design system, not from this site.' : ''} Check the address and click <b>Import This Page</b>.</>}
-        what={paste
-          ? 'The AI turns your text into page sections (hero, services, contact…). Your text is saved as copy.md.'
-          : 'The page is scraped and split into sections. All text is saved word for word (copy.md), all images are listed (images.md).'}
-        need={paste ? 'Your text. Markdown helps: # headings, - lists.' : 'The address of the page you want to rebuild.'}
-        time={paste ? 'About 30 seconds · ≈ $0.05' : '1–3 minutes · 1 scrape + ≈ $0.20'}
-      />
+      <StepHeader n={p.n} name="Content" title={t.title} lead={t.lead} what={t.what} need={t.need} time={t.time} />
       <div className="px-6 py-5">
         <ImportPanel
           key={`guided-import-${p.page.id}`}
@@ -286,9 +297,11 @@ function ContentStep(p: StepProps) {
           appSettings={p.appSettings}
           onStructureImported={p.onStructureImported}
           onPageUrlChange={p.onPageUrlChange}
-          initialSource={paste ? 'paste' : 'url'}
+          initialSource={mode}
           initialContent={preset?.id === 'content' ? (p.project.brief || '') : ''}
           pageName={p.page.page_name}
+          pageId={p.page.id}
+          initialDescription={preset?.id === 'describe' ? (p.project.brief || '') : ''}
         />
         {p.sections.length > 0 && (
           <div className="border border-green-200 bg-green-50 px-4 py-3">
@@ -299,7 +312,7 @@ function ContentStep(p: StepProps) {
               <Stat label="Images" value={countImages(p.page.images_md)} />
               <Stat label="Screenshot" value={p.screenshotMap[p.page.id] ? 'saved' : '—'} />
             </div>
-            <p className="text-xs text-green-800 mt-2">Importing again replaces these sections.</p>
+            <p className="text-xs text-green-800 mt-2">Building or importing again replaces these sections.</p>
           </div>
         )}
       </div>
@@ -373,7 +386,7 @@ function DesignStep(p: StepProps) {
             onClick={() => setShowFile(v => !v)}
             className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[#111827]"
           >
-            {hasDesign ? 'Paste or edit design.md' : 'Write design.md by hand'}
+            {hasDesign ? 'Paste or edit design.md' : 'Paste or write design.md'}
             {showFile ? <ChevronUp className="w-4 h-4 text-[#9CA3AF]" /> : <ChevronDown className="w-4 h-4 text-[#9CA3AF]" />}
           </button>
           {showFile && (
@@ -395,6 +408,11 @@ function ReviewStep(p: StepProps) {
   const findings = useMemo(
     () => (p.page.copy_md ? checkFabrication(p.sections, p.page.copy_md) : null),
     [p.sections, p.page.copy_md],
+  );
+  const aiCopy = !!p.page.copy_md?.includes(AI_COPY_MARKER);
+  const placeholders = useMemo(
+    () => (aiCopy && p.page.copy_md ? findPlaceholders(p.page.copy_md.split('\n\n').slice(1).join('\n\n')) /* skip the copy.md header */ : []),
+    [aiCopy, p.page.copy_md],
   );
   return (
     <>
@@ -423,15 +441,26 @@ function ReviewStep(p: StepProps) {
         </div>
 
         <div className="space-y-4 min-w-0">
+          {aiCopy && (
+            <div className="text-xs text-[#1E3A8A] border border-[#2575FC]/30 bg-[#EFF5FF] px-3 py-2">
+              <p className="font-semibold">AI-written copy</p>
+              {placeholders.length > 0 ? (
+                <p className="mt-0.5">Replace these placeholders with real details before the page goes to the client: {placeholders.slice(0, 10).map(x => `[${x}]`).join(', ')}{placeholders.length > 10 ? '…' : ''}</p>
+              ) : (
+                <p className="mt-0.5">No placeholders left. Still check names, claims and prices with the client.</p>
+              )}
+            </div>
+          )}
+
           <div>
-            <p className="text-xs font-semibold text-[#111827] mb-1.5">Fact-check</p>
+            <p className="text-xs font-semibold text-[#111827] mb-1.5">{aiCopy ? 'Sections vs. the written copy' : 'Fact-check'}</p>
             {findings === null ? (
               <p className="text-xs text-[#9CA3AF] border border-[#E5E7EB] px-3 py-2">No copy.md for this page, so nothing to compare.</p>
             ) : findings.length === 0 ? (
-              <p className="text-xs text-green-700 border border-green-200 bg-green-50 px-3 py-2 flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> All section text matches the original page.</p>
+              <p className="text-xs text-green-700 border border-green-200 bg-green-50 px-3 py-2 flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> All section text matches {aiCopy ? 'the written copy' : 'the original page'}.</p>
             ) : (
               <div className="text-xs text-amber-800 border border-amber-200 bg-amber-50 px-3 py-2">
-                <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> {findings.length} text{findings.length === 1 ? ' is' : 's are'} not on the original page</p>
+                <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> {findings.length} text{findings.length === 1 ? ' is' : 's are'} not in {aiCopy ? 'the written copy' : 'the original page'}</p>
                 <p className="mt-0.5">Check these before sending anything to the client:</p>
                 <ul className="list-disc pl-4 mt-1 space-y-0.5">
                   {findings.slice(0, 6).map((f, i) => (
@@ -533,38 +562,6 @@ function ExportStep(p: StepProps) {
           </ol>
           <p className="text-xs text-[#6B7280] mt-3">The prototype you generated is saved with the page; download it from the Prototype step.</p>
         </div>
-      </div>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Describe it myself: generate from the brief
-// ---------------------------------------------------------------------------
-
-function BriefStep(p: StepProps) {
-  return (
-    <>
-      <StepHeader
-        n={p.n}
-        name="Generate"
-        title="Generate the page from your description"
-        lead={<>Check your description below and click <b>Generate Page</b>. The page uses your design system. Download the result when you are happy with it.</>}
-        what="The AI writes and builds a full page from your description."
-        need="A short brief: business, audience, sections, tone."
-        time="2–4 minutes · ≈ $0.30"
-      />
-      <div className="px-6 py-5">
-        <CreatePanel
-          key={`guided-brief-${p.page.id}`}
-          provider={p.appSettings.aiProvider}
-          anthropicKey={p.appSettings.anthropicApiKey}
-          openaiKey={p.appSettings.openaiApiKey}
-          inline={true}
-          initialBrief={p.project.brief || ''}
-          projectDesignMd={p.project.design_md}
-          defaultOpen={true}
-        />
       </div>
     </>
   );

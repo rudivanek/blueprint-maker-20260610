@@ -20,6 +20,8 @@ const PURPOSE_LABELS: Record<string, string> = {
   'brief-html': 'Generate from brief',
   'scrape-design': 'Scrape (design)',
   'scrape-structure': 'Scrape (structure)',
+  'copy-questions': 'Copy: check description',
+  'copy-write': 'Copy: write it for me',
 };
 
 type Group = 'day' | 'project' | 'purpose';
