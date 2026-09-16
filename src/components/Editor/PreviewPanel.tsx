@@ -4,6 +4,8 @@
 // when the "Preview" tab is active.
 //
 // - Generate / Regenerate (with feedback) using useGenerateHtml
+// - "Edit on page": click an element to edit its text, image or link, or delete
+//   it; Undo (lib/visualEdit + VisualEditBar)
 // - "Describe changes": a quick AI check first (lib/changeCheck) — asks up to
 //   4 questions when the request is unclear, then applies it
 // - Live iframe preview (sandboxed: the prototype's own scripts run so sliders,
@@ -16,7 +18,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Wand2, Loader2, AlertCircle, Download, Copy, Check, Columns2,
-  Monitor, Tablet, Smartphone, RefreshCw, XCircle,
+  Monitor, Tablet, Smartphone, RefreshCw, XCircle, MousePointerClick, Undo2,
 } from 'lucide-react';
 import { useGenerateHtml } from '../../hooks/useGenerateHtml';
 import { prepareScreenshotForAI } from '../../lib/screenshot';
@@ -27,6 +29,11 @@ import { previewSource, stampHtml, isPreviewOutdated } from '../../lib/previewSt
 import { checkChanges, withAnswers } from '../../lib/changeCheck';
 import type { CopyQuestion } from '../../lib/copywriter';
 import { QuestionCard } from './QuestionCard';
+import { VisualEditBar } from './VisualEditBar';
+import {
+  applyEdit, editorFrameHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
+  type EditOp, type Selection,
+} from '../../lib/visualEdit';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -67,6 +74,122 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
 
   const gen = useGenerateHtml(appSettings.aiProvider ?? 'anthropic');
 
+  // ── Edit on page ──
+  const [editMode, setEditMode] = useState(false);
+  const [frameDoc, setFrameDoc] = useState('');
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [editingText, setEditingText] = useState(false);
+  const selectionRef = useRef<Selection | null>(null);
+  selectionRef.current = selection;
+  const [history, setHistory] = useState<string[]>([]);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const docRef = useRef<Document | null>(null);
+  const htmlRef = useRef(html);
+  htmlRef.current = html;
+  const scrollRef = useRef(0);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSave = useRef<string | null>(null);
+
+  const flushSave = () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    if (pendingSave.current !== null) {
+      onHtmlSaved(page.id, pendingSave.current);
+      pendingSave.current = null;
+    }
+  };
+  const scheduleSave = (next: string) => {
+    pendingSave.current = next;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushSave, 700);
+  };
+  const flushRef = useRef(flushSave);
+  flushRef.current = flushSave;
+  useEffect(() => () => flushRef.current(), []);
+
+  const pushHistory = (prev: string) => setHistory(h => [...h.slice(-19), prev]);
+
+  const loadIntoEditor = (source: string) => {
+    const doc = keyDocument(source);
+    docRef.current = doc;
+    setFrameDoc(editorFrameHtml(doc, scrollRef.current));
+    setSelection(null);
+    setEditingText(false);
+  };
+
+  const startEditing = () => {
+    if (!htmlRef.current) return;
+    scrollRef.current = 0;
+    setCompare(false);
+    loadIntoEditor(htmlRef.current);
+    setEditMode(true);
+  };
+
+  const stopEditing = () => {
+    flushSave();
+    setEditMode(false);
+    setSelection(null);
+    setEditingText(false);
+    docRef.current = null;
+  };
+
+  const post = (msg: Record<string, unknown>) =>
+    iframeRef.current?.contentWindow?.postMessage({ bpm: 1, ...msg }, '*');
+
+  const commitEdit = (op: EditOp, live: boolean) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    const prev = htmlRef.current;
+    if (!applyEdit(doc, op)) return;
+    const next = savedHtml(doc, prev);
+    pushHistory(prev);
+    htmlRef.current = next;
+    setHtml(next);
+    scheduleSave(next);
+    if (live) post({ type: 'apply', op });
+  };
+  const commitRef = useRef(commitEdit);
+  commitRef.current = commitEdit;
+
+  const undo = () => {
+    const prev = history[history.length - 1];
+    if (prev === undefined) return;
+    setHistory(h => h.slice(0, -1));
+    htmlRef.current = prev;
+    setHtml(prev);
+    scheduleSave(prev);
+    if (editMode) loadIntoEditor(prev);
+  };
+
+  // Messages from the editor script inside the preview (untrusted: only used to edit the prototype)
+  useEffect(() => {
+    if (!editMode) return;
+    const onMessage = (e: MessageEvent) => {
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
+      const m = e.data as Record<string, unknown> | null;
+      if (!m || m.bpm !== 1 || typeof m.type !== 'string') return;
+      switch (m.type) {
+        case 'select': {
+          const { type: _t, bpm: _b, ...rest } = m;
+          void _t; void _b;
+          setSelection(rest as unknown as Selection);
+          break;
+        }
+        case 'deselect': setSelection(null); break;
+        case 'editing': setEditingText(m.on === true); break;
+        case 'scroll': scrollRef.current = Number(m.y) || 0; break;
+        case 'text':
+          if (typeof m.key === 'string' && typeof m.html === 'string') commitRef.current({ type: 'text', key: m.key, html: m.html }, false);
+          break;
+        case 'requestDelete':
+          if (selectionRef.current) commitRef.current({ type: 'delete', key: selectionRef.current.key }, true);
+          break;
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [editMode]);
+
   const activeAIKey = appSettings.aiProvider === 'openai' ? appSettings.openaiApiKey : appSettings.anthropicApiKey;
   const hasKey = !!activeAIKey;
   const hasSections = sections.length > 0;
@@ -82,6 +205,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
 
   const runGenerate = async (isRegenerate: boolean, request = '') => {
     if (!hasKey || !hasSections) return;
+    if (!isRegenerate && hasManualEdits(htmlRef.current) &&
+        !window.confirm('Generate Fresh builds a new prototype from the sections and discards the edits you made on the page. (You can Undo afterwards.) Continue?')) return;
+    if (editMode) stopEditing();
     const jobId = jobStore.start({
       kind: 'generate',
       title: isRegenerate ? 'Applying your changes…' : 'Generating the prototype…',
@@ -143,7 +269,10 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     });
 
     if (result && !jobStore.isCancelled(jobId)) {
-      const stamped = stampHtml(result.html, source);
+      const keepMarker = isRegenerate && hasManualEdits(htmlRef.current);
+      const stamped = stampHtml(result.html, source) + (keepMarker ? `${EDITED_MARKER}\n` : '');
+      if (htmlRef.current) pushHistory(htmlRef.current);
+      htmlRef.current = stamped;
       setHtml(stamped);
       onHtmlSaved(page.id, stamped);
       setFeedback('');
@@ -210,6 +339,27 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             </button>
           )}
 
+          {html && !editMode && (
+            <button
+              onClick={startEditing}
+              disabled={isBusy}
+              title="Click elements in the preview to edit text, images and links"
+              className="flex items-center gap-1.5 px-3 py-2 border border-[#E5E7EB] hover:border-[#2575FC] text-sm text-[#111827] font-medium transition-all disabled:opacity-40"
+            >
+              <MousePointerClick className="w-4 h-4 text-[#2575FC]" /> Edit on page
+            </button>
+          )}
+          {!editMode && history.length > 0 && (
+            <button
+              onClick={undo}
+              disabled={isBusy}
+              title="Undo the last change to the prototype"
+              className="flex items-center gap-1.5 px-3 py-2 border border-[#E5E7EB] hover:border-[#2575FC] text-xs text-[#6B7280] hover:text-[#111827] transition-all disabled:opacity-40"
+            >
+              <Undo2 className="w-3.5 h-3.5" /> Undo
+            </button>
+          )}
+
           <div className="flex-1" />
 
           {/* Viewport toggle */}
@@ -234,7 +384,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
           {screenshot && (
             <button
               onClick={() => setCompare(v => !v)}
-              disabled={!html}
+              disabled={!html || editMode}
               className={`flex items-center gap-1.5 px-3 py-2 border text-xs font-medium transition-all disabled:opacity-30 ${compare ? 'bg-[#2575FC]/10 border-[#2575FC] text-[#2575FC]' : 'border-[#E5E7EB] text-[#9CA3AF] hover:text-[#111827] hover:border-[#2575FC]'}`}
               title="Compare with original screenshot"
             >
@@ -267,6 +417,22 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
               <b>This prototype is outdated.</b> It was made before the sections or the design changed, so it still shows the previous content. Click <b>Generate new prototype</b> to build it again (2–4 minutes, ≈ $0.30).
             </p>
           </div>
+        )}
+
+        {editMode && (
+          <VisualEditBar
+            selection={selection}
+            editingText={editingText}
+            canUndo={history.length > 0}
+            onEditText={() => post({ type: 'editText' })}
+            onImage={src => selection && commitEdit({ type: 'image', key: selection.key, src }, true)}
+            onLink={(href, text) => selection && commitEdit({ type: 'link', key: selection.key, href, text }, true)}
+            onDelete={() => selection && commitEdit({ type: 'delete', key: selection.key }, true)}
+            onParent={() => post({ type: 'selectParent' })}
+            onDeselect={() => post({ type: 'deselect' })}
+            onUndo={undo}
+            onDone={stopEditing}
+          />
         )}
 
         {/* Feedback / regenerate row */}
@@ -369,8 +535,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         ) : (
           <div className="h-full flex justify-center overflow-hidden py-0">
             <iframe
+              ref={iframeRef}
               title="Generated prototype"
-              srcDoc={html}
+              srcDoc={editMode ? frameDoc : html}
               sandbox="allow-scripts"
               style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: '100%' }}
               className="h-full border-0 bg-white shadow-sm transition-all"
