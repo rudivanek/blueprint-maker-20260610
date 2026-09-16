@@ -10,6 +10,8 @@
 //   and copy.md (lib/prototypeSync), so all steps and the export stay in sync
 // - Everything else that changes the prototype (AI changes, deleted elements,
 //   edits outside the sections) goes into the page's change list (lib/changeLog)
+// - Versions: a snapshot is saved before the prototype is replaced (lib/versions);
+//   "Update prototype" rebuilds an outdated prototype but keeps its changes
 // - "Describe changes" and "Change with AI": a short chat first (lib/changeChat +
 //   ChangeChat) — the AI says what it will do, warns, asks up to 4 questions;
 //   nothing changes until "Yes, do it" (optional: skip for clear requests)
@@ -42,6 +44,8 @@ import {
 } from '../../lib/visualEdit';
 import { cleanNewText, fieldForEdit, getField, replaceInCopyMd, setField, norm, type FieldKind } from '../../lib/prototypeSync';
 import { addChange, describeDelete, describeEdit, readChanges } from '../../lib/changeLog';
+import { loadVersion, saveVersion, type VersionInfo } from '../../lib/versions';
+import { VersionsMenu } from './VersionsMenu';
 import type { GlobalSettings, Page, PrototypeChange, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -200,6 +204,17 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     saveChanges(addChange(changesRef.current, entry));
   };
 
+  // ── Versions (saved in the database before the prototype is replaced) ──
+  const [versionsKey, setVersionsKey] = useState(0);
+  const snapshot = (label: string) => {
+    const current = pendingSave.current ?? htmlRef.current;
+    if (!current) return;
+    void saveVersion(page.id, current, label, changesRef.current).then(ok => { if (ok) setVersionsKey(k => k + 1); });
+  };
+  const short = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n)}…` : t);
+  // Edit on page: one snapshot per editing session, taken before the first manual edit
+  const sessionSnapshot = useRef(false);
+
   /** Undo: put the sections / copy.md back the way they were before the edit */
   const restoreChanges = (entry: HistoryEntry) => {
     if (entry.changes && JSON.stringify(entry.changes) !== JSON.stringify(changesRef.current)) saveChanges(entry.changes);
@@ -234,6 +249,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     scrollRef.current = 0;
     setCompare(false);
     loadIntoEditor(htmlRef.current);
+    sessionSnapshot.current = false;
     setEditMode(true);
   };
 
@@ -257,6 +273,10 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     const beforeCopyMd = copyMdRef.current;
     const wasCurrent = !isPreviewOutdated(prev, previewSource(designMd, globals, beforeSections));
     const beforeChanges = changesRef.current;
+    if (op.type !== 'replace' && !sessionSnapshot.current) {
+      sessionSnapshot.current = true;
+      snapshot('Before editing on page');
+    }
     const targets = syncTargets(doc, op);
     const before = describeElement(doc, op.key);
     if (!applyEdit(doc, op)) return;
@@ -361,6 +381,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       cancel: () => controller.abort(),
     });
     if (jobId === null) return;
+    snapshot(`Before Change with AI: ${short(meta?.label || 'element')}`);
     try {
       const change = await changeElement(
         appSettings.aiProvider ?? 'anthropic',
@@ -458,24 +479,25 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (jobRef.current !== null) jobStore.update(jobRef.current, localStatus || gen.status);
   }, [localStatus, gen.status]);
 
-  const runGenerate = async (isRegenerate: boolean, request = '', plan = '', label = '') => {
+  const runGenerate = async (isRegenerate: boolean, request = '', plan = '', label = '', opts: GenerateOpts = {}) => {
     if (!hasKey || !hasSections) return;
     const n = changesRef.current.length;
-    if (!isRegenerate && (hasManualEdits(htmlRef.current) || n > 0) &&
-        !window.confirm(`Generate Fresh builds a new prototype from the sections, the design${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'} — the AI rebuilds them, so details can look a little different` : ''}. The current prototype is replaced (you can Undo afterwards). Continue?`)) return;
+    if (!isRegenerate && htmlRef.current &&
+        !window.confirm(`Generate Fresh builds a completely new prototype from the sections, the design${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'} (the AI rebuilds them, so details can look different)` : ''}. The current prototype is saved under Versions, so you can restore it. 2–4 minutes, ≈ $0.30. Continue?`)) return;
     if (editMode) stopEditing();
+    snapshot(opts.versionLabel ?? (isRegenerate ? `Before: ${short(label || plan || 'Describe changes')}` : 'Before Generate Fresh'));
     const jobId = jobStore.start({
       kind: 'generate',
-      title: isRegenerate
+      title: opts.title ?? (isRegenerate
         ? (plan ? `Applying: ${plan.length > 90 ? `${plan.slice(0, 90)}…` : plan}` : 'Applying your changes…')
-        : 'Generating the prototype…',
+        : 'Generating the prototype…'),
       estimate: 'Usually 2–4 minutes',
       cancel: gen.cancel,
     });
     if (jobId === null) return;
     jobRef.current = jobId;
     try {
-      await generateNow(isRegenerate, jobId, request, label, plan);
+      await generateNow(isRegenerate, jobId, request, label, plan, opts.record !== false);
     } finally {
       jobStore.finish(jobId);
       jobRef.current = null;
@@ -489,7 +511,33 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     void runTurn({ mode: 'page', messages: [], turn: null, busy: false }, [{ role: 'user', text: request }]);
   };
 
-  const generateNow = async (isRegenerate: boolean, jobId: number, request: string, label = '', plan = '') => {
+  // Outdated prototype → rebuild it for the current sections / design, keeping its changes
+  const runUpdate = () => {
+    const n = changesRef.current.length;
+    if (!window.confirm(`Update the prototype to the current content and design? Its layout, widgets${n ? ` and your ${n} recorded change${n === 1 ? '' : 's'}` : ''} are kept. The current version is saved under Versions. 2–4 minutes, ≈ $0.30.`)) return;
+    void runGenerate(true, UPDATE_REQUEST, '', '', { record: false, title: 'Updating the prototype to the current content…', versionLabel: 'Before Update prototype' });
+  };
+
+  const restoreVersion = async (v: VersionInfo) => {
+    if (!window.confirm(`Restore “${v.label || 'this version'}”? The current prototype is saved under Versions first.`)) return;
+    try {
+      const data = await loadVersion(v.id);
+      if (!data.html) throw new Error('This version is empty');
+      if (editMode) stopEditing();
+      flushSave();
+      snapshot('Before restore');
+      pushHistory({ html: htmlRef.current, changes: changesRef.current });
+      htmlRef.current = data.html;
+      setHtml(data.html);
+      onHtmlSaved(page.id, data.html);
+      if (onPageUpdate) saveChanges(data.changes);
+      toast('Version restored. Not right? Click Undo.', 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not restore this version', 'error');
+    }
+  };
+
+  const generateNow = async (isRegenerate: boolean, jobId: number, request: string, label = '', plan = '', record = true) => {
     // Prepare screenshot slices as visual reference (best effort)
     let slices: string[] = [];
     if (screenshot) {
@@ -513,13 +561,13 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       const keepMarker = isRegenerate && hasManualEdits(htmlRef.current);
       const stamped = stampHtml(result.html, source) + (keepMarker ? `${EDITED_MARKER}\n` : '');
       if (htmlRef.current) pushHistory({ html: htmlRef.current, changes: changesRef.current });
-      if (isRegenerate) recordChange({ kind: 'ai-page', request: (label || request).trim(), plan });
+      if (isRegenerate && record) recordChange({ kind: 'ai-page', request: (label || request).trim(), plan });
       htmlRef.current = stamped;
       setHtml(stamped);
       onHtmlSaved(page.id, stamped);
       setFeedback('');
       if (isRegenerate) closeChat();
-      saveLastRequest(isRegenerate ? (label || request).trim() : '');
+      if (record) saveLastRequest(isRegenerate ? (label || request).trim() : '');
       ding();
       if (result.truncated) {
         toast('Output hit the token limit — bottom sections may be missing. Try regenerating or simplify the blueprint.', 'warning');
@@ -569,7 +617,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             className="flex items-center gap-2 px-4 py-2 bg-[#2575FC] hover:bg-[#1a5fe0] text-white text-sm font-medium rounded-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {gen.generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-            {outdated ? 'Generate new prototype' : html ? 'Generate Fresh' : 'Generate HTML'}
+            {html ? 'Generate Fresh' : 'Generate HTML'}
           </button>
 
           {gen.generating && (
@@ -590,6 +638,9 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
             >
               <MousePointerClick className="w-4 h-4 text-[#2575FC]" /> Edit on page
             </button>
+          )}
+          {html && !editMode && (
+            <VersionsMenu pageId={page.id} disabled={isBusy} refreshKey={versionsKey} onRestore={v => void restoreVersion(v)} />
           )}
           {!editMode && history.length > 0 && (
             <button
@@ -653,11 +704,23 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         </div>
 
         {outdated && !isBusy && (
-          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 px-3 py-2">
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 px-3 py-2 flex-wrap">
             <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-            <p className="text-amber-700 text-xs">
-              <b>This prototype is outdated.</b> It was made before the sections or the design changed, so it still shows the previous content. Click <b>Generate new prototype</b> to build it again (2–4 minutes, ≈ $0.30).
+            <p className="text-amber-700 text-xs flex-1 min-w-[240px]">
+              <b>This prototype is outdated.</b> The sections or the design changed after it was made.
+              {editMode ? ' Update it before editing further, so your work isn’t lost.' : ' Update it to the current content — your layout, widgets and recorded changes are kept.'}
             </p>
+            {!editMode && (
+              <button
+                type="button"
+                onClick={runUpdate}
+                disabled={!hasKey || !hasSections}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium shrink-0 disabled:opacity-40"
+                title="2–4 minutes · ≈ $0.30"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Update prototype, keep my changes
+              </button>
+            )}
           </div>
         )}
 
@@ -882,3 +945,16 @@ function describeElement(doc: Document, key: string): { label: string; sectionId
     href: el.getAttribute('href') ?? '',
   };
 }
+
+interface GenerateOpts {
+  /** add to the change list / "last change" line (default true) */
+  record?: boolean;
+  /** progress window title */
+  title?: string;
+  /** label of the version saved before */
+  versionLabel?: string;
+}
+
+const UPDATE_REQUEST = `SYNC UPDATE — blueprint.md and/or design.md changed after this prototype was made.
+Update the previous HTML so every section, text, image, link, color and font matches the CURRENT blueprint.md and design.md: add, remove or reorder sections exactly as the blueprint says.
+Keep everything else from the previous version: layout decisions, working widgets (sliders, galleries, tabs…), styling details and all "Approved Prototype Changes" listed in the blueprint.`;
