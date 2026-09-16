@@ -49,7 +49,7 @@ export function EditorPage({ user }: EditorPageProps) {
   const { project, loading: projectLoading, updateGlobals, updateDesignMd, updateProject } = useProject(projectId);
   const { pages, loading: pagesLoading, createPage, updatePage, deletePage, reorderPages } = usePages(projectId);
   const [activePageId, setActivePageId] = useState<string | null>(null);
-  const { sections, createSection, updateSection, deleteSection, replaceAllSections } = useSections(activePageId || undefined);
+  const { sections, createSection, updateSection, deleteSection, restoreSection, replaceAllSections } = useSections(activePageId || undefined);
   // Section edits → prototype + copy.md (text, images, links)
   const { noteSectionEdit } = usePrototypeSync({
     project,
@@ -576,6 +576,7 @@ export function EditorPage({ user }: EditorPageProps) {
                   onSectionUpdate={handleSectionUpdate}
                   onSectionSync={handleSectionSync}
                   onSectionDelete={id => deleteSection(id)}
+                  onSectionRestore={sec => { void restoreSection(sec); triggerSaved(); }}
                   onAddSection={() => setShowTemplateModal(true)}
                   onPageUpdate={updates => { updatePage(activePage.id, updates); triggerSaved(); }}
                 />
@@ -602,6 +603,8 @@ export function EditorPage({ user }: EditorPageProps) {
                 onHtmlSaved={handleGeneratedHtmlSaved}
                 onSectionSync={handleSectionSync}
                 onPageUpdate={updates => { updatePage(activePage.id, updates); triggerSaved(); }}
+                onSectionDelete={id => { void deleteSection(id); triggerSaved(); }}
+                onSectionRestore={sec => { void restoreSection(sec); triggerSaved(); }}
               />
             </div>
           ) : (

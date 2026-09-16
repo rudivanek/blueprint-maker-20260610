@@ -101,6 +101,29 @@ export function useSections(pageId: string | undefined) {
     else setSections(prev => [...prev, ...(data as Record<string, unknown>[]).map(normalizeSection)]);
   };
 
+  const restoreSection = async (sec: Section) => {
+    const row = {
+      id: sec.id,
+      page_id: sec.page_id,
+      section_name: sec.section_name,
+      section_type: sec.section_type,
+      background_hex: sec.background_hex,
+      headline_size: sec.headline_size,
+      layout_variant: sec.layout_variant,
+      layout_description: sec.layout_description,
+      layout_contract: normalizeLayoutContract(sec.layout_contract),
+      copy: sec.copy,
+      items: sec.items,
+      images: sec.images,
+      notes: sec.notes,
+      sort_order: sec.sort_order,
+    };
+    const { data, error } = await supabase.from('sections').insert(row).select().single();
+    if (error) { setError(error.message); return; }
+    const restored = normalizeSection(data as Record<string, unknown>);
+    setSections(prev => [...prev.filter(s => s.id !== restored.id), restored].sort((a, b) => a.sort_order - b.sort_order));
+  };
+
   const replaceAllSections = async (sectionList: Partial<Section>[]) => {
     if (!pageId) return;
     const { error: delError } = await supabase.from('sections').delete().eq('page_id', pageId);
@@ -127,6 +150,6 @@ export function useSections(pageId: string | undefined) {
     else setSections((data as Record<string, unknown>[]).map(normalizeSection));
   };
 
-  return { sections, loading, error, createSection, updateSection, deleteSection, reorderSections, bulkCreateSections, replaceAllSections, refetch: fetchSections };
+  return { sections, loading, error, createSection, updateSection, deleteSection, restoreSection, reorderSections, bulkCreateSections, replaceAllSections, refetch: fetchSections };
 }
 

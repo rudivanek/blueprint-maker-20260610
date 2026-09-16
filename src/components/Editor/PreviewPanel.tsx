@@ -42,7 +42,7 @@ import {
   applyEdit, editorFrameHtml, elementContext, elementHtml, hasManualEdits, keyDocument, savedHtml, EDITED_MARKER,
   type EditOp, type Selection,
 } from '../../lib/visualEdit';
-import { cleanNewText, fieldForEdit, getField, replaceInCopyMd, setField, norm, type FieldKind } from '../../lib/prototypeSync';
+import { cleanNewText, fieldForEdit, getField, planDelete, renumberMarks, replaceInCopyMd, setField, norm, type DeletePlan, type FieldKind } from '../../lib/prototypeSync';
 import { addChange, describeDelete, describeEdit, readChanges } from '../../lib/changeLog';
 import { loadVersion, saveVersion, type VersionInfo } from '../../lib/versions';
 import { VersionsMenu } from './VersionsMenu';
@@ -61,6 +61,10 @@ interface PreviewPanelProps {
   onSectionSync?: (id: string, updates: Partial<Section>) => void;
   /** used to keep copy.md in sync */
   onPageUpdate?: (updates: Partial<Page>) => void;
+  /** Edit on page deleted a whole section → delete it from the blueprint too */
+  onSectionDelete?: (id: string) => void;
+  /** Undo of such a delete → put the section back (same id) */
+  onSectionRestore?: (section: Section) => void;
 }
 
 type Viewport = 'desktop' | 'tablet' | 'mobile';
@@ -70,7 +74,7 @@ const VIEWPORT_WIDTHS: Record<Viewport, string> = {
   mobile: '390px',
 };
 
-export function PreviewPanel({ designMd, globals, page, sections, screenshot, appSettings, onHtmlSaved, onSectionSync, onPageUpdate }: PreviewPanelProps) {
+export function PreviewPanel({ designMd, globals, page, sections, screenshot, appSettings, onHtmlSaved, onSectionSync, onPageUpdate, onSectionDelete, onSectionRestore }: PreviewPanelProps) {
   const [html, setHtml] = useState<string>(page.generated_html || '');
   const [feedback, setFeedback] = useState('');
   const [compare, setCompare] = useState(false);
@@ -215,6 +219,63 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   // Edit on page: one snapshot per editing session, taken before the first manual edit
   const sessionSnapshot = useRef(false);
 
+  /** Delete on the page: does it remove something from the sections? (asks before deleting a whole section) */
+  const planSectionDelete = (doc: Document, key: string): DeletePlan | null => {
+    if (!onSectionSync) return null;
+    const el = doc.querySelector(`[data-bpm-k="${CSS.escape(key)}"]`);
+    if (!el) return null;
+    const plan = planDelete(el, sectionsRef.current);
+    if (plan?.kind === 'section') {
+      const sec = sectionsRef.current.find(s => s.id === plan.sectionId);
+      if (!onSectionDelete || !window.confirm(`Also delete the section “${sec?.section_name || 'this section'}” from the blueprint (Review step and export)?\n\nOK = delete it everywhere · Cancel = remove it from the prototype only`)) return null;
+    }
+    return plan;
+  };
+
+  /** Apply a delete plan to the sections, the marks and copy.md. Returns true when something changed. */
+  const applyDeletePlan = (doc: Document, plan: DeletePlan): boolean => {
+    const list = sectionsRef.current;
+    const old = list.find(s => s.id === plan.sectionId);
+    if (!old) return false;
+    // texts that disappear → take them out of copy.md too
+    const texts: string[] = [];
+    const collect = (s: Section) => {
+      texts.push(s.copy?.headline, s.copy?.subheadline, s.copy?.body, s.copy?.cta_text);
+      (s.items ?? []).forEach(it => texts.push(it.title, it.description));
+    };
+    if (plan.kind === 'section') {
+      collect(old);
+      sectionsRef.current = list.filter(s => s.id !== old.id);
+      onSectionDelete?.(old.id);
+      toast(`Section “${old.section_name}” deleted from the blueprint too. Undo brings it back.`, 'info');
+    } else {
+      renumberMarks(doc, old.id, plan.removedItems, plan.removedImages);
+      for (const k of ['headline', 'subheadline', 'body', 'cta_text'] as const) {
+        if (old.copy?.[k] && !plan.next.copy?.[k]) texts.push(old.copy[k]);
+      }
+      plan.removedItems.forEach(i => texts.push(old.items[i]?.title ?? '', old.items[i]?.description ?? ''));
+      (old.items ?? []).forEach((it, i) => {
+        if (plan.removedItems.includes(i)) return;
+        const now = plan.next.items[i - plan.removedItems.filter(r => r < i).length];
+        if (it.title && !now?.title) texts.push(it.title);
+        if (it.description && !now?.description) texts.push(it.description);
+      });
+      sectionsRef.current = list.map(s => (s.id === old.id ? plan.next : s));
+      onSectionSync?.(old.id, { copy: plan.next.copy, items: plan.next.items, images: plan.next.images });
+      toast(`Also removed from “${old.section_name}”: ${plan.summary}. Undo brings it back.`, 'info');
+    }
+    let copyMd = copyMdRef.current;
+    for (const t of texts) {
+      if (t && t.trim()) copyMd = replaceInCopyMd(copyMd, t, '') ?? copyMd;
+    }
+    copyMd = copyMd.replace(/\n{3,}/g, '\n\n');
+    if (copyMd !== copyMdRef.current) {
+      copyMdRef.current = copyMd;
+      onPageUpdate?.({ copy_md: copyMd });
+    }
+    return true;
+  };
+
   /** Undo: put the sections / copy.md back the way they were before the edit */
   const restoreChanges = (entry: HistoryEntry) => {
     if (entry.changes && JSON.stringify(entry.changes) !== JSON.stringify(changesRef.current)) saveChanges(entry.changes);
@@ -224,11 +285,11 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     const cur = sectionsRef.current;
     for (const old of entry.sections) {
       const now = cur.find(s => s.id === old.id);
-      if (!now) continue;
+      if (!now) { onSectionRestore?.(old); continue; }
       const pick = (s: Section) => JSON.stringify([s.copy, s.items, s.images]);
       if (pick(now) !== pick(old)) onSectionSync(old.id, { copy: old.copy, items: old.items, images: old.images });
     }
-    sectionsRef.current = cur.map(s => entry.sections!.find(o => o.id === s.id) ?? s);
+    sectionsRef.current = entry.sections;
     restoreChanges(entry);
     if (entry.copyMd !== undefined && entry.copyMd !== copyMdRef.current) {
       copyMdRef.current = entry.copyMd;
@@ -279,9 +340,11 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     }
     const targets = syncTargets(doc, op);
     const before = describeElement(doc, op.key);
+    const delPlan = op.type === 'delete' ? planSectionDelete(doc, op.key) : null;
     if (!applyEdit(doc, op)) return;
+    const deleted = delPlan ? applyDeletePlan(doc, delPlan) : false;
     let next = savedHtml(doc, prev);
-    const synced = syncBack(targets, op);
+    const synced = syncBack(targets, op) || deleted;
     // the prototype already shows the change → keep it "current" for the updated sections
     if (synced && wasCurrent) next = stampHtml(next, previewSource(designMd, globals, sectionsRef.current));
     pushHistory({ html: prev, changes: beforeChanges, ...(synced ? { sections: beforeSections, copyMd: beforeCopyMd } : {}) });

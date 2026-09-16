@@ -64,6 +64,8 @@ interface GuidedEditorProps {
   /** Edit on page changed a text / image / link → update the section only */
   onSectionSync: (id: string, updates: Partial<Section>) => void;
   onSectionDelete: (id: string) => void;
+  /** Undo of a section deleted in Edit on page */
+  onSectionRestore?: (section: Section) => void;
   onAddSection: () => void;
   onPageUpdate: (updates: Partial<Page>) => void;
 }
@@ -581,6 +583,8 @@ function PrototypeStep(p: StepProps) {
             onHtmlSaved={p.onHtmlSaved}
             onSectionSync={p.onSectionSync}
             onPageUpdate={p.onPageUpdate}
+            onSectionDelete={p.onSectionDelete}
+            onSectionRestore={p.onSectionRestore}
           />
         </div>
       </div>

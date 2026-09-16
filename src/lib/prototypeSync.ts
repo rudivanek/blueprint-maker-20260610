@@ -253,3 +253,101 @@ export function changedTexts(oldS: Section, newS: Section): [string, string][] {
   }
   return out;
 }
+
+// ── deleting on the page → sections ──
+
+export type DeletePlan =
+  | { kind: 'section'; sectionId: string }
+  | { kind: 'content'; sectionId: string; next: Section; removedItems: number[]; removedImages: number[]; summary: string };
+
+const markOf = (e: Element) => e.getAttribute('data-bpm-f') ?? '';
+
+/**
+ * What does deleting this element remove from the sections?
+ * - the element is a whole section → { kind: 'section' }
+ * - otherwise: items / images whose marks are all inside it are removed,
+ *   text fields inside it are cleared. Unmarked prototypes: exact text / src match.
+ * Returns null when nothing in the sections matches.
+ */
+export function planDelete(el: Element, sections: Section[]): DeletePlan | null {
+  const byId = new Map(sections.map(s => [s.id, s]));
+  const ownSid = el.getAttribute('data-bpm-s');
+  if (ownSid && byId.has(ownSid)) return { kind: 'section', sectionId: ownSid };
+
+  const root = el.closest('[data-bpm-s]');
+  const sid = root?.getAttribute('data-bpm-s') ?? '';
+  const section = byId.get(sid);
+  const inside = [el, ...el.querySelectorAll('[data-bpm-f]')].filter(e => markOf(e));
+
+  if (section && root && inside.length) {
+    const doc = el.ownerDocument;
+    const allRoots = [...doc.querySelectorAll(`[data-bpm-s="${sid.replace(/["\\]/g, '\\$&')}"]`)];
+    const allMarks = allRoots.flatMap(r => [r, ...r.querySelectorAll('[data-bpm-f]')]).filter(e => markOf(e));
+    const clear = new Set<string>();
+    const items = new Set<number>();
+    const images = new Set<number>();
+    for (const m of inside) {
+      const f = markOf(m);
+      let mm: RegExpMatchArray | null;
+      if ((mm = f.match(/^items\.(\d+)\./))) {
+        const n = Number(mm[1]);
+        const all = allMarks.filter(x => markOf(x).startsWith(`items.${n}.`));
+        if (all.every(x => el.contains(x))) items.add(n);
+        else clear.add(f);
+      } else if ((mm = f.match(/^images\.(\d+)$/))) {
+        images.add(Number(mm[1]));
+      } else if (/^copy\.(headline|subheadline|body|cta_text)$/.test(f)) {
+        clear.add(f);
+      }
+    }
+    return buildPlan(section, clear, items, images);
+  }
+
+  // unmarked: exact matches
+  if (el.tagName === 'IMG') {
+    const ref = fieldForEdit(el, 'src', el.getAttribute('src') ?? '', sections);
+    if (!ref) return null;
+    const s = byId.get(ref.sectionId)!;
+    const m = ref.path.match(/^images\.(\d+)$/);
+    return m ? buildPlan(s, new Set(), new Set(), new Set([Number(m[1])])) : buildPlan(s, new Set([ref.path]), new Set(), new Set());
+  }
+  const ref = fieldForEdit(el, 'text', el.textContent ?? '', sections);
+  if (!ref) return null;
+  return buildPlan(byId.get(ref.sectionId)!, new Set([ref.path]), new Set(), new Set());
+}
+
+function buildPlan(section: Section, clear: Set<string>, items: Set<number>, images: Set<number>): DeletePlan | null {
+  let next: Section = { ...section };
+  const parts: string[] = [];
+  for (const path of clear) {
+    if (/^items\.(\d+)\./.test(path) && items.has(Number(path.split('.')[1]))) continue;
+    if (!getField(next, path)) continue;
+    next = { ...next, ...setField(next, path, '') };
+    parts.push(path);
+  }
+  const removedItems = [...items].filter(i => i < (section.items ?? []).length).sort((a, b) => a - b);
+  const removedImages = [...images].filter(i => i < (section.images ?? []).length).sort((a, b) => a - b);
+  if (removedItems.length) next = { ...next, items: (next.items ?? []).filter((_, i) => !removedItems.includes(i)) };
+  if (removedImages.length) next = { ...next, images: (next.images ?? []).filter((_, i) => !removedImages.includes(i)) };
+  if (!parts.length && !removedItems.length && !removedImages.length) return null;
+  const bits = [
+    removedItems.length ? `${removedItems.length} item${removedItems.length === 1 ? '' : 's'}` : '',
+    removedImages.length ? `${removedImages.length} image${removedImages.length === 1 ? '' : 's'}` : '',
+    parts.length ? `${parts.length} text${parts.length === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return { kind: 'content', sectionId: section.id, next, removedItems, removedImages, summary: bits.join(', ') };
+}
+
+/** After items / images were removed from a section, shift the marks of the ones after them. */
+export function renumberMarks(doc: Document, sectionId: string, removedItems: number[], removedImages: number[]) {
+  if (!removedItems.length && !removedImages.length) return;
+  const shift = (n: number, removed: number[]) => n - removed.filter(r => r < n).length;
+  doc.querySelectorAll(`[data-bpm-s="${sectionId.replace(/["\\]/g, '\\$&')}"]`).forEach(root => {
+    [root, ...root.querySelectorAll('[data-bpm-f]')].forEach(e => {
+      const f = markOf(e);
+      let m: RegExpMatchArray | null;
+      if ((m = f.match(/^items\.(\d+)\.(.+)$/))) e.setAttribute('data-bpm-f', `items.${shift(Number(m[1]), removedItems)}.${m[2]}`);
+      else if ((m = f.match(/^images\.(\d+)$/))) e.setAttribute('data-bpm-f', `images.${shift(Number(m[1]), removedImages)}`);
+    });
+  });
+}
