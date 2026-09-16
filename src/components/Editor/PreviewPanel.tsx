@@ -4,6 +4,8 @@
 // when the "Preview" tab is active.
 //
 // - Generate / Regenerate (with feedback) using useGenerateHtml
+// - "Describe changes": a quick AI check first (lib/changeCheck) — asks up to
+//   4 questions when the request is unclear, then applies it
 // - Live iframe preview (sandboxed: the prototype's own scripts run so sliders,
 //   tabs etc. work, but without same-origin access to the app)
 // - Compare mode: original screenshot side-by-side with the generated HTML
@@ -22,6 +24,9 @@ import { toast } from '../ui/Toast';
 import { ding } from '../../lib/ding';
 import { jobStore } from '../../lib/jobStore';
 import { previewSource, stampHtml, isPreviewOutdated } from '../../lib/previewStamp';
+import { checkChanges, withAnswers } from '../../lib/changeCheck';
+import type { CopyQuestion } from '../../lib/copywriter';
+import { QuestionCard } from './QuestionCard';
 import type { GlobalSettings, Page, Section, AppSettings } from '../../types';
 
 interface PreviewPanelProps {
@@ -49,6 +54,16 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
   const [viewport, setViewport] = useState<Viewport>('desktop');
   const [copied, setCopied] = useState(false);
   const [localStatus, setLocalStatus] = useState('');
+  // Questions about the current change request (null = not asked yet)
+  const [questions, setQuestions] = useState<CopyQuestion[] | null>(null);
+  const lastKey = `bpm_lastchange_${page.id}`;
+  const [lastRequest, setLastRequest] = useState(() => {
+    try { return localStorage.getItem(lastKey) ?? ''; } catch { return ''; }
+  });
+  const saveLastRequest = (v: string) => {
+    setLastRequest(v);
+    try { if (v) localStorage.setItem(lastKey, v); else localStorage.removeItem(lastKey); } catch { /* ignore */ }
+  };
 
   const gen = useGenerateHtml(appSettings.aiProvider ?? 'anthropic');
 
@@ -65,7 +80,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (jobRef.current !== null) jobStore.update(jobRef.current, localStatus || gen.status);
   }, [localStatus, gen.status]);
 
-  const runGenerate = async (isRegenerate: boolean) => {
+  const runGenerate = async (isRegenerate: boolean, request = '') => {
     if (!hasKey || !hasSections) return;
     const jobId = jobStore.start({
       kind: 'generate',
@@ -76,14 +91,38 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
     if (jobId === null) return;
     jobRef.current = jobId;
     try {
-      await generateNow(isRegenerate, jobId);
+      await generateNow(isRegenerate, jobId, request);
     } finally {
       jobStore.finish(jobId);
       jobRef.current = null;
     }
   };
 
-  const generateNow = async (isRegenerate: boolean, jobId: number) => {
+  // "Apply Changes": quick check first; questions only when the request is unclear.
+  const handleApply = async () => {
+    const request = feedback.trim();
+    if (!request || !hasKey || !hasSections) return;
+    const jobId = jobStore.start({ kind: 'generate', title: 'Checking your request…', estimate: 'A few seconds' });
+    if (jobId === null) return;
+    let qs: CopyQuestion[] = [];
+    let failed = false;
+    try {
+      qs = await checkChanges(appSettings.aiProvider ?? 'anthropic', request, sections);
+    } catch {
+      failed = true;
+    } finally {
+      jobStore.finish(jobId);
+    }
+    if (jobStore.isCancelled(jobId)) return;
+    if (qs.length > 0) {
+      setQuestions(qs);
+      return;
+    }
+    if (failed) toast('Could not check the request — applying it as written.', 'warning');
+    void runGenerate(true, request);
+  };
+
+  const generateNow = async (isRegenerate: boolean, jobId: number, request: string) => {
     // Prepare screenshot slices as visual reference (best effort)
     let slices: string[] = [];
     if (screenshot) {
@@ -100,7 +139,7 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       sections,
       screenshots: slices,
       previousHtml: isRegenerate && html ? html : undefined,
-      feedback: isRegenerate && feedback.trim() ? feedback.trim() : undefined,
+      feedback: isRegenerate && request.trim() ? request.trim() : undefined,
     });
 
     if (result && !jobStore.isCancelled(jobId)) {
@@ -108,6 +147,8 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
       setHtml(stamped);
       onHtmlSaved(page.id, stamped);
       setFeedback('');
+      setQuestions(null);
+      saveLastRequest(isRegenerate ? request.trim().split('\n\nDetails:')[0] : '');
       ding();
       if (result.truncated) {
         toast('Output hit the token limit — bottom sections may be missing. Try regenerating or simplify the blueprint.', 'warning');
@@ -229,25 +270,42 @@ export function PreviewPanel({ designMd, globals, page, sections, screenshot, ap
         )}
 
         {/* Feedback / regenerate row */}
+        {html && lastRequest && !questions && (
+          <p className="text-[11px] text-[#6B7280] truncate" title={lastRequest}>
+            <span className="font-medium text-[#374151]">Last change applied:</span> {lastRequest}
+          </p>
+        )}
         {html && (
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
+          <div className="flex items-start gap-2">
+            <textarea
               value={feedback}
-              onChange={e => setFeedback(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && feedback.trim() && !isBusy) runGenerate(true); }}
-              placeholder='Describe changes, e.g. "Make the hero taller, move the CTA button to the right, lighter gray for section 3 background"'
+              onChange={e => { setFeedback(e.target.value); setQuestions(null); }}
+              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && feedback.trim() && !isBusy) { e.preventDefault(); void handleApply(); } }}
+              rows={2}
+              placeholder='Describe changes, e.g. "Make the hero taller, turn the gallery into a slider, lighter gray for section 3 background"'
               disabled={isBusy}
-              className="flex-1 bg-white border border-[#E5E7EB] rounded-none px-3 py-2 text-sm text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all disabled:opacity-50"
+              className="flex-1 bg-white border border-[#E5E7EB] rounded-none px-3 py-2 text-sm text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2575FC] transition-all disabled:opacity-50 resize-y leading-snug"
             />
             <button
-              onClick={() => runGenerate(true)}
-              disabled={!feedback.trim() || isBusy}
+              onClick={() => void handleApply()}
+              disabled={!feedback.trim() || isBusy || !!questions}
+              title="Ctrl/⌘ + Enter"
               className="flex items-center gap-1.5 px-4 py-2 bg-[#F9FAFB] hover:bg-white border border-[#E5E7EB] hover:border-[#2575FC] text-sm text-[#111827] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Apply Changes
             </button>
           </div>
+        )}
+        {html && questions && questions.length > 0 && (
+          <QuestionCard
+            title="A few quick questions before the page is rebuilt"
+            questions={questions}
+            submitLabel="Apply with these answers"
+            disabled={isBusy}
+            onSubmit={answers => void runGenerate(true, withAnswers(feedback, questions, answers))}
+            onSkip={() => void runGenerate(true, feedback.trim())}
+            onCancel={() => setQuestions(null)}
+          />
         )}
 
         {/* Status / errors */}

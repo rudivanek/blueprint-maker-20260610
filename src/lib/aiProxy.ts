@@ -22,7 +22,7 @@ export const OPENAI_MODEL = 'gpt-4.1';
 export type Purpose =
   | 'design-system' | 'design-from-html' | 'wp-extract' | 'structure-import' | 'content-import'
   | 'generate-html' | 'regenerate-html' | 'brief-html'
-  | 'scrape-design' | 'scrape-structure' | 'copy-questions' | 'copy-write' | 'other';
+  | 'scrape-design' | 'scrape-structure' | 'copy-questions' | 'copy-write' | 'change-questions' | 'other';
 
 // ── Project context (which project a call belongs to, for the usage log) ──
 let currentProjectId: string | null = null;

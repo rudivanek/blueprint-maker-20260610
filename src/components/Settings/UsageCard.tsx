@@ -22,6 +22,7 @@ const PURPOSE_LABELS: Record<string, string> = {
   'scrape-structure': 'Scrape (structure)',
   'copy-questions': 'Copy: check description',
   'copy-write': 'Copy: write it for me',
+  'change-questions': 'Preview: check changes',
 };
 
 type Group = 'day' | 'project' | 'purpose';

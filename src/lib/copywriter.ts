@@ -78,7 +78,7 @@ function briefText(brief: CopyBrief): string {
   return `DESCRIPTION:\n${brief.description.trim()}\n\nPAGE TYPE: ${brief.pageType}\nPAGE LANGUAGE: ${brief.language}`;
 }
 
-function cleanQuestions(raw: unknown): CopyQuestion[] {
+export function cleanQuestions(raw: unknown): CopyQuestion[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((q, i): CopyQuestion | null => {
