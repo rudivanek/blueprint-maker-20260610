@@ -5,7 +5,7 @@
 // (React + Tailwind and/or a single HTML file) — one prompt per combination.
 
 
-export type BuilderId = 'bolt' | 'lovable' | 'replit' | 'v0' | 'claude' | 'chat';
+export type BuilderId = 'bolt' | 'lovable' | 'replit' | 'v0' | 'claude-code' | 'cursor' | 'claude' | 'chat';
 export type OutputId = 'react' | 'html';
 
 export const BUILDERS: { id: BuilderId; label: string; hint: string }[] = [
@@ -13,8 +13,10 @@ export const BUILDERS: { id: BuilderId; label: string; hint: string }[] = [
   { id: 'lovable', label: 'Lovable', hint: 'lovable.dev' },
   { id: 'replit', label: 'Replit', hint: 'Replit Agent' },
   { id: 'v0', label: 'v0', hint: 'v0.dev' },
-  { id: 'claude', label: 'Claude Code / Cursor', hint: 'Coding agent in your own project folder' },
-  { id: 'chat', label: 'Any AI chat', hint: 'Claude, ChatGPT, Gemini … in the browser' },
+  { id: 'claude-code', label: 'Claude Code', hint: 'Anthropic’s coding agent, in your own project folder' },
+  { id: 'cursor', label: 'Cursor', hint: 'Cursor agent, in your own project folder' },
+  { id: 'claude', label: 'Claude (claude.ai)', hint: 'Claude chat or a Claude Project — builds an artifact with live preview' },
+  { id: 'chat', label: 'Any AI chat', hint: 'ChatGPT, Gemini … in the browser' },
 ];
 
 export const OUTPUTS: { id: OutputId; label: string; hint: string }[] = [
@@ -24,7 +26,8 @@ export const OUTPUTS: { id: OutputId; label: string; hint: string }[] = [
 
 export interface ExportTargets { tools: BuilderId[]; outputs: OutputId[] }
 
-const TOOLS_KEY = 'bpm_export_tools';
+const TOOLS_KEY = 'bpm_export_tools_v2';
+const OLD_TOOLS_KEY = 'bpm_export_tools'; // before 2026-09-16: 'claude' meant "Claude Code / Cursor"
 const OUTPUTS_KEY = 'bpm_export_outputs';
 
 function readList<T extends string>(key: string, allowed: readonly T[], fallback: T[]): T[] {
@@ -37,7 +40,18 @@ function readList<T extends string>(key: string, allowed: readonly T[], fallback
   }
 }
 
+function migrateOldTools() {
+  try {
+    if (localStorage.getItem(TOOLS_KEY) !== null) return;
+    const old = JSON.parse(localStorage.getItem(OLD_TOOLS_KEY) ?? 'null');
+    if (!Array.isArray(old)) return;
+    const next = old.flatMap((x: string) => (x === 'claude' ? ['claude-code', 'cursor'] : [x]));
+    localStorage.setItem(TOOLS_KEY, JSON.stringify(next));
+  } catch { /* ignore */ }
+}
+
 export function readTargets(): ExportTargets {
+  migrateOldTools();
   return {
     tools: readList(TOOLS_KEY, BUILDERS.map(b => b.id), ['bolt']),
     outputs: readList(OUTPUTS_KEY, OUTPUTS.map(o => o.id), ['react']),
@@ -123,7 +137,7 @@ This site has ${p.pages.length} pages: ${p.pages.join(', ')}. Build "${p.pages[0
 }
 
 const TOOL_NAME: Record<BuilderId, string> = {
-  bolt: 'Bolt', lovable: 'Lovable', replit: 'Replit', v0: 'v0', claude: 'Claude Code / Cursor', chat: 'AI chat',
+  bolt: 'Bolt', lovable: 'Lovable', replit: 'Replit', v0: 'v0', 'claude-code': 'Claude Code', cursor: 'Cursor', claude: 'Claude', chat: 'AI chat',
 };
 
 const REACT: Record<BuilderId, { stack: string; how: string }> = {
@@ -154,15 +168,36 @@ const REACT: Record<BuilderId, { stack: string; how: string }> = {
 - lucide-react for icons; fonts via next/font or the Google Fonts link`,
     how: 'Build app/page.tsx from one component per section (components/sections/…), plus shared header and footer. Every section must be complete — no "…rest of the page" shortcuts.',
   },
-  claude: {
+  'claude-code': {
     stack: `- Vite + React + TypeScript + Tailwind CSS (unless this folder already has a project — then use its stack)
 - lucide-react for icons
-- One component per section, shared layout components`,
-    how: `1. Put the attached files in ./docs/ and read ALL of them before writing code.
-2. Make a short plan: sections → components, design tokens → Tailwind theme.
-3. Build section by section. After each one, compare it with docs/prototype.html.
-4. Run the dev server and the build; fix errors and warnings.
+- One component per section in src/components/sections/, shared Header / Footer`,
+    how: `1. Copy the attached files into ./docs/ and read ALL of them before writing code.
+2. Create a short CLAUDE.md in the project root with the rules above (file priority, texts word for word, placeholders stay, widgets must work, check against docs/prototype.html), so they apply in every later session.
+3. Plan first: sections → components, design tokens → Tailwind theme. Show me the plan, then build.
+4. Build section by section. After each one, compare it with docs/prototype.html.
+5. Run the dev server and \`npm run build\`; fix all errors and warnings.
+6. Finish with a checklist: every blueprint section present, texts identical to copy.md, every widget works, mobile OK.`,
+  },
+  cursor: {
+    stack: `- Vite + React + TypeScript + Tailwind CSS (unless this folder already has a project — then use its stack)
+- lucide-react for icons
+- One component per section in src/components/sections/, shared Header / Footer`,
+    how: `1. Copy the attached files into ./docs/ and read ALL of them (@docs) before writing code.
+2. Save the rules above as .cursor/rules/website.mdc (alwaysApply: true), so they apply to every later request.
+3. Plan first, then build section by section in Agent mode. After each section, compare it with docs/prototype.html.
+4. Run the dev server and \`npm run build\`; fix all errors and warnings.
 5. Finish with a checklist: every blueprint section present, texts identical to copy.md, every widget works, mobile OK.`,
+  },
+  claude: {
+    stack: `- One React component (default export) styled only with Tailwind utility classes, lucide-react for icons — it renders as a live artifact
+- Colours and fonts from design.md as Tailwind arbitrary values (e.g. bg-[#0055FF]); load the Google Font with an @import inside a <style> element in the component
+- No other libraries; all widget logic with React state`,
+    how: `1. The files are attached to this chat or uploaded to this Claude Project — read ALL of them first.
+2. Build the whole page as ONE React artifact, one clearly named sub-component per section, in blueprint order.
+3. If the page is too long for one answer, build it in parts and update the same artifact; continue when I say "continue".
+4. When it's done, list anything you couldn't match from prototype.html.
+5. If I ask for a real project afterwards, give me the Vite + React + Tailwind file tree and every file in full.`,
   },
   chat: {
     stack: `- Vite + React + TypeScript
@@ -177,7 +212,9 @@ const HTML_HOW: Record<BuilderId, string> = {
   lovable: 'Deliver the page as ONE self-contained HTML file (index.html) — plain HTML, CSS and JavaScript, no React components. If the project needs an entry point, put the complete file in public/index.html and make the app show it unchanged. Build every section; don\'t stop after the first ones.',
   replit: 'Create a static HTML project with just index.html (no framework, no server code). Build the complete page, run it and check it against prototype.html.',
   v0: 'Deliver the page as ONE self-contained HTML file (index.html) — plain HTML, CSS and JavaScript, no React or Next.js components. Output the complete file.',
-  claude: 'Write ./index.html (put the attached files in ./docs/ and read all of them first). Build section by section, compare each with docs/prototype.html, then open the file in a browser and check mobile and every widget',
+  'claude-code': 'Copy the attached files into ./docs/ and read all of them first. Create a short CLAUDE.md with the rules above. Write ./index.html section by section, compare each with docs/prototype.html, then open it in a browser (or serve the folder) and check mobile and every widget.',
+  cursor: 'Copy the attached files into ./docs/ and read all of them (@docs) first. Save the rules above as .cursor/rules/website.mdc. Write ./index.html section by section in Agent mode, compare each with docs/prototype.html, then open it in a browser and check mobile and every widget.',
+  claude: 'The files are attached to this chat or uploaded to this Claude Project — read all of them first. Build the page as ONE HTML artifact (it previews live next to the chat), section by section in blueprint order, updating the same artifact. If it gets too long, continue in the same artifact when I say "continue". At the end, list anything you couldn\'t match from prototype.html.',
   chat: 'Reply with the complete index.html in ONE code block — no explanations, no "…" shortcuts. If it gets too long, stop at the end of a section and continue when I say "continue".',
 };
 
@@ -213,7 +250,3 @@ ${pagesBlock(p, output)}
 export function readmePromptLines(t: ExportTargets): string {
   return combos(t).map(c => `- ${promptFileName(c.tool, c.output)} — first message for ${comboLabel(c.tool, c.output)}`).join('\n');
 }
-
-
-
-
