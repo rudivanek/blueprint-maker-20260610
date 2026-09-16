@@ -630,11 +630,12 @@ function ExportStep(p: StepProps & { outdated: boolean; onGoPrototype: () => voi
         <div className="bg-[#F9FAFB] border border-[#E5E7EB] px-4 py-3 text-sm leading-relaxed h-fit">
           <p className="font-semibold text-[#111827] mb-1">How to use the ZIP</p>
           <ol className="list-decimal pl-5 text-[#374151] space-y-1">
-            <li>Paste <b>prompt.txt</b> as the first message in your AI tool.</li>
-            <li>Attach <b>design.md</b>, the blueprint, <b>copy.md</b> and <b>images.md</b> (and the screenshot if included).</li>
+            <li>Choose your tools under <b>Build with</b> and the <b>Output</b> (React + Tailwind and/or a single HTML file) — several are fine — then export.</li>
+            <li>Paste the matching prompt (e.g. <b>prompt-bolt-react.txt</b>) as the first message in that tool.</li>
+            <li>Attach <b>prototype.html</b>, <b>changes.md</b>, the blueprint, <b>copy.md</b>, <b>images.md</b> and <b>design.md</b> (and the screenshot if included).</li>
             <li>For more pages: "Add this page using the same design system and components" + that page's files.</li>
           </ol>
-          <p className="text-xs text-[#6B7280] mt-3">The ZIP also contains <b>prototype.html</b> (with all your changes) and <b>changes.md</b>, so the AI builder rebuilds exactly what you approved.</p>
+          <p className="text-xs text-[#6B7280] mt-3"><b>prototype.html</b> contains all your changes, so the AI builder rebuilds exactly what you approved — as a real React site or as one HTML file, in whichever tool you choose.</p>
         </div>
       </div>
     </>

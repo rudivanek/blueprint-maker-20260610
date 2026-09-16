@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { Download, Copy, FileText, Archive, Loader2, Check, Image, ShieldCheck, AlertTriangle } from 'lucide-react';
 import type { Project, Page, Section } from '../../types';
 import { useExport } from '../../hooks/useExport';
-import { generateBlueprintMd, getMasterPrompt } from '../../lib/prompts';
+import { generateBlueprintMd } from '../../lib/prompts';
+import { BUILDERS, OUTPUTS, buildBuilderPrompt, comboLabel, combos, promptFileName, readTargets, saveTargets, type BuilderId, type ExportTargets, type OutputId } from '../../lib/builderPrompts';
+import { readChanges } from '../../lib/changeLog';
 import { ding } from '../../lib/ding';
 import { checkFabrication } from '../../lib/pageAssets';
 import { syncStatus } from '../../lib/syncStatus';
@@ -20,6 +22,21 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
   const [copied, setCopied] = useState<string | null>(null);
   const [includeScreenshots, setIncludeScreenshots] = useState(false);
   const { exportZip, downloadFile, copyToClipboard, exporting } = useExport();
+  // "Build with" (tools) × "Output" (React / single HTML) — one prompt per combination, remembered in this browser
+  const [targets, setTargets] = useState<ExportTargets>(readTargets);
+  const [previewKey, setPreviewKey] = useState('');
+  const toggle = <K extends keyof ExportTargets>(kind: K, id: ExportTargets[K][number]) => {
+    setTargets(cur => {
+      const list = cur[kind] as string[];
+      const nextList = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
+      if (nextList.length === 0) return cur; // keep at least one
+      const next = { ...cur, [kind]: nextList } as ExportTargets;
+      saveTargets(next);
+      return next;
+    });
+  };
+  const comboList = combos(targets);
+  const previewCombo = comboList.find(c => `${c.tool}-${c.output}` === previewKey) ?? comboList[0];
 
   const pagesWithScreenshots = pages.filter(p => screenshotMap[p.id]);
   const hasAnyScreenshot = pagesWithScreenshots.length > 0;
@@ -30,7 +47,7 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
   };
 
   const handleExportZip = async () => {
-    await exportZip(project, pages, allSections, screenshotMap, includeScreenshots);
+    await exportZip(project, pages, allSections, screenshotMap, includeScreenshots, targets);
     ding();
   };
 
@@ -56,7 +73,16 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
   };
 
   const blueprintPreview = activePage ? generateBlueprintMd(project.globals, activePage, activeSections) : '';
-  const promptPreview = getMasterPrompt(includeScreenshots && hasAnyScreenshot);
+  const promptPreview = buildBuilderPrompt(previewCombo.tool, previewCombo.output, {
+    projectName: project.name,
+    hasDesign: !!project.design_md,
+    hasPrototype: pages.some(p => p.generated_html),
+    hasChanges: pages.some(p => p.generated_html || readChanges(p).length),
+    hasCopy: pages.some(p => p.copy_md),
+    hasImages: pages.some(p => p.images_md),
+    hasScreenshots: includeScreenshots && hasAnyScreenshot,
+    pages: pages.map(p => p.page_name),
+  });
 
   // Pages whose prototype no longer matches their sections / the design (only pages whose sections are loaded)
   const outdatedPages = pages.filter(pg => {
@@ -67,6 +93,21 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
   return (
     <div className="h-full overflow-auto px-4 py-5 space-y-4">
       <div>
+        <p className="text-[11px] font-medium text-[#111827] mb-1.5">Build with</p>
+        <div className="flex flex-wrap gap-1.5 mb-2.5">
+          {BUILDERS.map(b => (
+            <Chip key={b.id} on={targets.tools.includes(b.id)} title={b.hint} onClick={() => toggle('tools', b.id as BuilderId)}>{b.label}</Chip>
+          ))}
+        </div>
+        <p className="text-[11px] font-medium text-[#111827] mb-1.5">Output</p>
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {OUTPUTS.map(o => (
+            <Chip key={o.id} on={targets.outputs.includes(o.id)} title={o.hint} onClick={() => toggle('outputs', o.id as OutputId)}>{o.label}</Chip>
+          ))}
+        </div>
+        <p className="text-[10px] text-[#9CA3AF] mb-3">
+          {comboList.length} prompt{comboList.length === 1 ? '' : 's'} in the ZIP — one per tool and output. Choose several of each if you like.
+        </p>
         <button
           onClick={handleExportZip}
           disabled={exporting}
@@ -105,7 +146,7 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
         )}
 
         <p className="text-[#9CA3AF] text-[10px] text-center mt-2">
-          prompt.txt + design.md + blueprint.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{pages.some(p => p.generated_html) ? ' + prototype.html + changes.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
+          {comboList.length > 2 ? `${comboList.length} prompts` : comboList.map(c => promptFileName(c.tool, c.output)).join(' + ')} + design.md + blueprint.md{pages.some(p => p.copy_md) ? ' + copy.md + images.md + fact-check.md' : ''}{pages.some(p => p.generated_html) ? ' + prototype.html + changes.md' : ''}{includeScreenshots && hasAnyScreenshot ? ' + screenshot(s)' : ''}
         </p>
       </div>
 
@@ -200,7 +241,15 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
           <div className="flex items-center gap-2">
             <FileText className="w-3.5 h-3.5 text-[#9CA3AF]" />
-            <span className="text-[#111827] text-xs font-medium">Master Prompt</span>
+            <span className="text-[#111827] text-xs font-medium">Prompt for</span>
+            <select
+              value={`${previewCombo.tool}-${previewCombo.output}`}
+              onChange={e => setPreviewKey(e.target.value)}
+              aria-label="Prompt for which tool"
+              className="text-xs border border-[#E5E7EB] bg-white px-1.5 py-0.5 focus:outline-none focus:border-[#2575FC] max-w-[200px]"
+            >
+              {comboList.map(c => <option key={`${c.tool}-${c.output}`} value={`${c.tool}-${c.output}`}>{comboLabel(c.tool, c.output)}</option>)}
+            </select>
           </div>
           <button
             onClick={() => handleCopy(promptPreview, 'prompt')}
@@ -236,5 +285,19 @@ export function ExportPanel({ project, pages, allSections, activePage, activeSec
         </div>
       )}
     </div>
+  );
+}
+
+function Chip({ on, title, onClick, children }: { on: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={on}
+      className={`flex items-center gap-1 px-2.5 py-1 text-xs border transition-colors ${on ? 'bg-[#2575FC] border-[#2575FC] text-white' : 'bg-white border-[#E5E7EB] text-[#374151] hover:border-[#2575FC]'}`}
+    >
+      {on && <Check className="w-3 h-3" />}{children}
+    </button>
   );
 }
