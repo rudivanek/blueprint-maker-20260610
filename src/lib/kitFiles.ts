@@ -1,27 +1,28 @@
 // src/lib/kitFiles.ts
 //
 // Builder Kit: the files an AI builder needs for ONE page, and when each is ready.
-// Every file can be downloaded on its own as soon as its step is done
-// (components/Editor/KitFiles), or all together as a ZIP (hooks/useExport).
+// The kit is a set of independent cards (components/Editor/BuilderKit): make only
+// design.md, only the content, or both. Every file can be downloaded on its own as
+// soon as it exists, or all together as a ZIP (hooks/useExport).
 
 import type { Page, Project, Section } from '../types';
 import { generateBlueprintMd } from './prompts';
 import { checkFabrication, factCheckMd } from './pageAssets';
 import { comboLabel, combos, promptFileName, type ExportTargets } from './builderPrompts';
 
-export type KitStepId = 'content' | 'design' | 'review' | 'kit' | 'preview';
+export type KitStepId = 'design' | 'content' | 'sections' | 'prompt' | 'preview';
 
 export const KIT_STEP_LABEL: Record<KitStepId, string> = {
-  content: 'Source',
   design: 'Design',
-  review: 'Quick check',
-  kit: 'Download kit',
+  content: 'Content',
+  sections: 'Sections',
+  prompt: 'Builder prompt',
   preview: 'Quick preview',
 };
 
 export interface KitFile {
   name: string;
-  /** the step that makes this file */
+  /** the card that makes this file */
   step: KitStepId;
   ready: boolean;
   /** one line: what the file is (or why it isn't ready) */
@@ -34,23 +35,25 @@ export interface KitInput {
   sections: Section[];
   /** screenshot of the original page (kept for this browser session only) */
   screenshot?: string;
-  /** Quick check was confirmed (Next) */
-  reviewed: boolean;
 }
 
 const has = (s?: string | null) => !!s && !!s.trim();
 
-/** The page's files in kit order. Prompts, README and the ZIP are handled by the kit step. */
-export function kitFiles({ project, page, sections, screenshot, reviewed }: KitInput): KitFile[] {
-  const content = sections.length > 0;
+/** Does the page have content (text or sections)? */
+export const hasContent = (page: Page, sections: Section[]) => has(page.copy_md) || sections.length > 0;
+
+/** The page's files. Prompts, README and the ZIP are handled by the Builder prompt card. */
+export function kitFiles({ project, page, sections, screenshot }: KitInput): KitFile[] {
+  const content = hasContent(page, sections);
+  const secs = sections.length > 0;
   return [
+    { name: 'design.md', step: 'design', ready: has(project.design_md), hint: 'Colours, fonts, spacing, components' },
     { name: 'copy.md', step: 'content', ready: has(page.copy_md), hint: 'The exact page text' },
     { name: 'images.md', step: 'content', ready: has(page.images_md), hint: 'Image URLs by section' },
     { name: 'site.md', step: 'content', ready: content, hint: 'Navigation, footer, SEO' },
     { name: 'screenshot.jpg', step: 'content', ready: !!screenshot, hint: screenshot ? 'The original page' : 'Only right after an import (this session)' },
-    { name: 'design.md', step: 'design', ready: has(project.design_md), hint: 'Colours, fonts, spacing, components' },
-    { name: 'blueprint.md', step: 'review', ready: content && reviewed, hint: 'Sections, layout, copy, items, images' },
-    { name: 'fact-check.md', step: 'review', ready: content && reviewed && has(page.copy_md), hint: 'Texts not found in copy.md' },
+    { name: 'blueprint.md', step: 'sections', ready: secs, hint: 'Sections, layout, copy, items, images' },
+    { name: 'fact-check.md', step: 'sections', ready: secs && has(page.copy_md), hint: 'Texts not found in copy.md' },
   ];
 }
 
@@ -156,7 +159,9 @@ Page: ${page.page_name}${page.page_url || project.url ? ` (${page.page_url || pr
 ${list.map(c => `   - ${promptFileName(c.tool, c.output)} → ${comboLabel(c.tool, c.output)}`).join('\n')}
 3. Attach these files to the same message (or upload them to the project / knowledge):
 ${['blueprint.md', 'copy.md', 'design.md', 'site.md', 'images.md', 'screenshot.jpg', 'prototype.html', 'changes.md'].filter(has).map(n => `   - ${n}`).join('\n')}
-4. Send, let it build, then check every section against blueprint.md.
+${has('copy.md') || has('blueprint.md')
+    ? '4. Send, let it build, then check every section against ' + (has('blueprint.md') ? 'blueprint.md.' : 'copy.md.')
+    : '4. This kit has no page content: add a short description of the page (or paste your texts) below the prompt, then send.'}
 
 ## Files
 ${[

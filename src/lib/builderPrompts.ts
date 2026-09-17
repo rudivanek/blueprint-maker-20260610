@@ -87,6 +87,8 @@ export interface PackageInfo {
   hasScreenshots: boolean;
   /** site.md (navigation, footer, SEO) is included */
   hasSite?: boolean;
+  /** blueprint.md is included (default: true). Builder Kit leaves it out when the page has no sections. */
+  hasBlueprint?: boolean;
   /** single page: number of sections in blueprint.md (for the final check) */
   sectionCount?: number;
   /** page names in order (first = start page) */
@@ -99,7 +101,7 @@ function filesBlock(p: PackageInfo): string {
   const list: string[] = [];
   if (p.hasPrototype) list.push(`**${f('prototype', 'html')}** — the design the client APPROVED: look, layout, spacing, colours and working widgets. Read its HTML, CSS and JavaScript and match it closely.`);
   if (p.hasChanges) list.push(`**${f('changes', 'md')}** — changes approved after the blueprint was written. Keep every one of them.`);
-  list.push(`**${f('blueprint', 'md')}** — page structure: sections in order, layout contract, copy, items and images per section.`);
+  if (p.hasBlueprint !== false) list.push(`**${f('blueprint', 'md')}** — page structure: sections in order, layout contract, copy, items and images per section.`);
   if (p.hasCopy) list.push(`**${f('copy', 'md')}** — the exact page text. Use it word for word.`);
   if (p.hasImages) list.push(`**${f('images', 'md')}** — real image URLs grouped by section. Use them.`);
   if (p.hasDesign) list.push('**design.md** — design tokens: colours, fonts (with the Google Fonts link), sizes, spacing, components.');
@@ -111,25 +113,48 @@ ${list.map((l, i) => `${i + 1}. ${l}`).join('\n')}
 If you can't read attached .md / .html files, ask me to paste their content.`;
 }
 
-const RULES_COMMON = `- Build every section from the blueprint, in the same order. Don't add, merge or drop sections.
+/** The page structure rule, depending on what the kit contains. */
+function structureRules(p: PackageInfo): string {
+  if (p.hasBlueprint !== false) {
+    return `- Build every section from the blueprint, in the same order. Don't add, merge or drop sections.
 - Use the texts word for word. Never invent facts, numbers, names, prices, reviews or awards.
 - Don't write new sentences either: no extra taglines, subtitles, intros or button texts that aren't in the files. Short labels that only repeat a section name are fine.
-- Keep any [placeholder] exactly as written and visible — the client fills them in later.
+- Keep any [placeholder] exactly as written and visible — the client fills them in later.`;
+  }
+  if (p.hasCopy) {
+    return `- copy.md is the page: every # or ## heading starts a section, in the same order. Don't add, merge or drop sections.
+- Use the texts word for word. Never invent facts, numbers, names, prices, reviews or awards.
+- Don't write new sentences either: no extra taglines, subtitles, intros or button texts that aren't in copy.md. Short labels that only repeat a section name are fine.
+- Keep any [placeholder] exactly as written and visible — the client fills them in later.`;
+  }
+  return `- There is no page content in the files. Use the page description and texts I give you with this prompt. If I didn't give any, ask me for them before you build.
+- Never invent facts, numbers, names, prices, reviews or awards — use clearly marked [placeholders] instead.`;
+}
+
+function designRule(p: PackageInfo): string {
+  if (p.hasDesign) return '- Take colours, fonts and spacing from design.md' + (p.hasPrototype ? ' / prototype.html' : '') + ' — no default theme colours. Load the fonts from the Google Fonts link in design.md. Use design.md fully: heading font and sizes, body font, buttons, cards, section backgrounds.';
+  if (p.hasPrototype) return '- Take colours, fonts and spacing from prototype.html — no default theme colours.';
+  return '- No design system is attached: choose a modern design that fits the business (colours, fonts from Google Fonts, spacing) and use it consistently. Define it once as design tokens and use them everywhere.';
+}
+
+function rulesCommon(p: PackageInfo): string {
+  return `${structureRules(p)}
 - Everything interactive must really work: navigation and mobile menu, sliders / carousels (arrows, dots, swipe), galleries with lightbox, tabs, accordions / FAQ, sticky header, smooth scrolling, forms (validation + a thank-you message; no backend unless I ask).
 - Responsive: desktop, tablet and mobile (main breakpoint 768px). No horizontal scrolling.
-- Take colours, fonts and spacing from design.md / prototype.html — no default theme colours. Load the fonts from the Google Fonts link in design.md. Use design.md fully: heading font and sizes, body font, buttons, cards, section backgrounds.
+${designRule(p)}
 - Use the real image URLs. Only if an image is missing, use a neutral placeholder of the right size.
 - Accessible: semantic HTML, one h1, alt texts, visible focus, keyboard support, good contrast.`;
+}
 
-const RULES_REACT = `## Rules
-${RULES_COMMON}
+const rulesReact = (p: PackageInfo) => `## Rules
+${rulesCommon(p)}
 - Rebuild the prototype in this stack's idiomatic way (components, not one big file) — it must LOOK and BEHAVE the same, the code doesn't have to be the same.`;
 
-const RULES_HTML = `## Rules
-${RULES_COMMON}
+const rulesHtml = (p: PackageInfo) => `## Rules
+${rulesCommon(p)}
 - ONE self-contained file: index.html with all CSS in one <style> in the head and all JavaScript in one <script> just before </body>. Even if your tool normally creates a React / Vite app: don't — the result must open by double-clicking index.html, with no server and no build.
 - No frameworks, no build step, no npm packages, no CSS frameworks, no jQuery. Plain, modern HTML, CSS and JavaScript. Only external resources: Google Fonts and the image URLs.
-- Put the design tokens from design.md in :root CSS variables and use them everywhere.
+- Put the design tokens${p.hasDesign ? ' from design.md' : ''} in :root CSS variables and use them everywhere.
 - JavaScript: wrap it in DOMContentLoaded, connect widgets with data-attributes, keep it compact. All content must still be visible if JavaScript doesn't run.
 - If prototype.html is attached, it already follows these rules — start from it and improve it rather than starting over.`;
 
@@ -224,6 +249,37 @@ const HTML_HOW: Record<BuilderId, string> = {
   chat: 'Reply with the complete index.html in ONE code block — no explanations, no "…" shortcuts. If it gets too long, stop at the end of a section and continue when I say "continue".',
 };
 
+/** Without a blueprint, point the builder to copy.md (or to the files in general). */
+function withoutBlueprint(text: string, p: PackageInfo): string {
+  const src = p.hasCopy ? 'copy.md' : 'the files';
+  return text
+    .replace(/docs\/blueprint\.md/g, p.hasCopy ? 'docs/copy.md' : 'the files in docs/')
+    .replace(/blueprint order/g, p.hasCopy ? 'copy.md order' : 'a logical order')
+    .replace(/every blueprint section/g, p.hasCopy ? 'every section of copy.md' : 'every section')
+    .replace(/blueprint\.md/g, src);
+}
+
+/** Without design.md, the builder chooses the design itself. */
+function withoutDesign(text: string): string {
+  return text
+    .replace(/approved the attached blueprint and design/g, 'approved the attached blueprint')
+    .replace(/\(theme colours and fonts from design\.md in tailwind\.config\)/g, '(your chosen colours and fonts in tailwind.config)')
+    .replace(/with the colours and fonts from design\.md as theme tokens/g, 'with your chosen colours and fonts as theme tokens')
+    .replace(/with the colours and fonts from design\.md/g, 'with your chosen colours and fonts')
+    .replace(/\(colours and fonts from design\.md\)/g, '(your chosen colours and fonts)')
+    .replace(/Colours and fonts from design\.md as Tailwind/g, 'Your chosen colours and fonts as Tailwind')
+    .replace(/Google Fonts link from design\.md; /g, 'Google Fonts for the chosen fonts; ')
+    .replace(/design tokens → Tailwind theme/g, 'your design tokens → Tailwind theme')
+    .replace(/design\.md/g, 'your design');
+}
+
+/** Without copy.md and blueprint, the texts come with the prompt. */
+function withoutTexts(text: string): string {
+  return text
+    .replace(/texts identical to copy\.md/g, 'texts exactly as I gave them')
+    .replace(/copy\.md/g, 'the texts I gave you');
+}
+
 /** Without a prototype, the texts mustn't point the builder to prototype.html. */
 function withoutPrototype(text: string): string {
   return text
@@ -237,8 +293,20 @@ function withoutPrototype(text: string): string {
 
 /** The prompt for one tool and one output type. */
 export function buildBuilderPrompt(tool: BuilderId, output: OutputId, p: PackageInfo): string {
-  const text = promptText(tool, output, p);
-  return p.hasPrototype ? text : withoutPrototype(text);
+  let text = promptText(tool, output, p);
+  if (!p.hasPrototype) text = withoutPrototype(text);
+  if (p.hasBlueprint === false) text = withoutBlueprint(text, p);
+  if (!p.hasDesign) text = withoutDesign(text);
+  if (!p.hasCopy && p.hasBlueprint === false) text = withoutTexts(text);
+  if (!p.hasImages && !p.hasPrototype) {
+    text = text
+      .replace(/; image URLs from images\.md/g, '')
+      .replace(/- Use the real image URLs\. Only if an image is missing, use a neutral placeholder of the right size\./g,
+        p.hasBlueprint === false
+          ? '- No image list is attached: use neutral placeholder images of the right size (or the images I give you).'
+          : '- Use the image URLs from the blueprint. Only if an image is missing, use a neutral placeholder of the right size.');
+  }
+  return text;
 }
 
 function promptText(tool: BuilderId, output: OutputId, p: PackageInfo): string {
@@ -255,22 +323,28 @@ ${REACT[tool].stack}`;
   const noProto = p.hasPrototype ? '' : `
 
 ## Design
-There is no prototype, so you design the page — within design.md. Make it look like a premium, modern website: a strong hero, clear visual hierarchy, generous spacing, and varied section layouts (don't repeat the same centered block for every section). Follow each section's Layout Contract; where it leaves room, choose the stronger layout.`;
-  const check = p.sectionCount && p.pages.length <= 1
+There is no prototype, so you design the page${p.hasDesign ? ' — within design.md' : ''}. Make it look like a premium, modern website: a strong hero, clear visual hierarchy, generous spacing, and varied section layouts (don't repeat the same centered block for every section).${p.hasBlueprint !== false ? " Follow each section's Layout Contract; where it leaves room, choose the stronger layout." : ''}`;
+  const noContent = p.hasBlueprint === false && !p.hasCopy ? `
+
+## The page
+${p.hasDesign ? 'This kit only contains the design system — use it for every page you build. ' : ''}Describe the page below (or paste its texts), then send:
+
+[Describe the page: business, audience, sections you want, calls to action]` : '';
+  const check = p.sectionCount && p.pages.length <= 1 && p.hasBlueprint !== false
     ? `\n\n## Before you finish\nCheck: the page has all ${p.sectionCount} sections of blueprint.md in order, every text is from the files, every [placeholder] is still there, every link and widget works${output === 'html' ? ', and the result is one index.html' : ''}.`
     : '';
   return `# Build the website "${p.projectName}" (${name} · ${output === 'html' ? 'single HTML file' : tool === 'v0' ? 'Next.js + Tailwind' : 'React + Tailwind'})
 
-A client approved ${p.hasPrototype ? 'the attached HTML prototype' : 'the attached blueprint and design'}. ${intro}
+${p.hasPrototype ? 'A client approved the attached HTML prototype.' : p.hasBlueprint !== false ? 'A client approved the attached blueprint and design.' : 'Use the attached files.'} ${intro}
 
 ${filesBlock(p)}
 
 ${stack}
 
-${output === 'html' ? RULES_HTML : RULES_REACT}${noProto}
+${output === 'html' ? rulesHtml(p) : rulesReact(p)}${noProto}
 
 ## How to work
-${output === 'html' ? HTML_HOW[tool] : REACT[tool].how}${check}
+${output === 'html' ? HTML_HOW[tool] : REACT[tool].how}${check}${noContent}
 ${pagesBlock(p, output)}
 `;
 }

@@ -33,7 +33,7 @@ export function useExport() {
     includeScreenshots = false,
     targets: ExportTargets = { tools: ['bolt'], outputs: ['react'] },
     /** Builder Kit: its own ZIP name and README.md */
-    opts: { zipName?: string; readme?: string } = {},
+    opts: { zipName?: string; readme?: string; onlyReady?: boolean } = {},
   ) => {
     setExporting(true);
     try {
@@ -55,7 +55,8 @@ export function useExport() {
         hasCopy: pages.some(p => p.copy_md),
         hasImages: pages.some(p => p.images_md),
         hasScreenshots,
-        hasSite: true,
+        hasSite: opts.onlyReady ? pages.some(p => p.copy_md?.trim() || (allSections[p.id] || []).length) : true,
+        hasBlueprint: opts.onlyReady ? pages.some(p => (allSections[p.id] || []).length) : true,
         sectionCount: pages.length === 1 ? (allSections[pages[0].id] || []).length : undefined,
         pages: pages.map(p => p.page_name),
       };
@@ -68,20 +69,23 @@ export function useExport() {
 
       for (const page of pages) {
         const sections = allSections[page.id] || [];
-        const blueprintMd = generateBlueprintMd(globals, page, sections);
-        const filename = multiPage
-          ? `blueprint-${page.slug || page.page_name.toLowerCase().replace(/\s+/g, '-')}.md`
-          : 'blueprint.md';
-        zip.file(filename, blueprintMd);
+        // Builder Kit (onlyReady): no empty blueprint / site file when the page has no content
+        if (!opts.onlyReady || sections.length) {
+          const blueprintMd = generateBlueprintMd(globals, page, sections);
+          const filename = multiPage
+            ? `blueprint-${page.slug || page.page_name.toLowerCase().replace(/\s+/g, '-')}.md`
+            : 'blueprint.md';
+          zip.file(filename, blueprintMd);
+        }
 
         // Verbatim copy, real images and the fact check (only when captured at import)
         const suffix = multiPage ? `-${page.slug || page.page_name.toLowerCase().replace(/\s+/g, '-')}` : '';
         if (page.copy_md) {
           zip.file(`copy${suffix}.md`, page.copy_md);
-          zip.file(`fact-check${suffix}.md`, factCheckMd(page.page_name, checkFabrication(sections, page.copy_md)));
+          if (!opts.onlyReady || sections.length) zip.file(`fact-check${suffix}.md`, factCheckMd(page.page_name, checkFabrication(sections, page.copy_md)));
         }
         if (page.images_md) zip.file(`images${suffix}.md`, page.images_md);
-        zip.file(`site${suffix}.md`, siteMd(project, page));
+        if (!opts.onlyReady || page.copy_md?.trim() || sections.length) zip.file(`site${suffix}.md`, siteMd(project, page));
 
         // The approved prototype (with all later changes) + the change list
         if (page.generated_html) zip.file(`prototype${suffix}.html`, cleanPrototypeHtml(page.generated_html));

@@ -21,6 +21,7 @@ import { syncStatus } from '../lib/syncStatus';
 import { PresetGuide } from '../components/Editor/PresetGuide';
 import { ProcessingOverlay } from '../components/ui/ProcessingOverlay';
 import { GuidedEditor } from '../components/Editor/GuidedEditor';
+import { KitHub } from '../components/Editor/BuilderKit';
 import { getPreset, type GuideStepId } from '../lib/presets';
 import { loadSettings } from '../lib/settings';
 import { setUsageProject } from '../lib/aiProxy';
@@ -548,7 +549,7 @@ export function EditorPage({ user }: EditorPageProps) {
               </div>
             ))}
 
-            {kitMode ? null : !showAddPage ? (
+            {kitMode && pages.length > 0 ? null : !showAddPage ? (
               <button
                 onClick={() => setShowAddPage(true)}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-[#9CA3AF] hover:text-[#2575FC] hover:bg-white text-xs transition-all shrink-0"
@@ -574,10 +575,27 @@ export function EditorPage({ user }: EditorPageProps) {
           {/* Guided mode: the step-by-step wizard */}
           {guided ? (
             <div className="flex-1 overflow-auto" id="bpm-guided-scroll">
-              {activePage ? (
+              {activePage && kitMode ? (
+                <KitHub
+                  project={project}
+                  page={activePage}
+                  sections={sections}
+                  screenshotMap={screenshotMap}
+                  appSettings={appSettings}
+                  onStructureImported={handleStructureImported}
+                  onPageUrlChange={handlePageUrlChange}
+                  onDesignGenerated={handleDesignGenerated}
+                  onDesignMdChange={handleDesignMdUpdate}
+                  onHtmlSaved={handleGeneratedHtmlSaved}
+                  onSectionUpdate={handleSectionUpdate}
+                  onSectionSync={handleSectionSync}
+                  onSectionDelete={id => deleteSection(id)}
+                  onSectionRestore={sec => { void restoreSection(sec); triggerSaved(); }}
+                  onAddSection={() => setShowTemplateModal(true)}
+                  onPageUpdate={updates => { updatePage(activePage.id, updates); triggerSaved(); }}
+                />
+              ) : activePage ? (
                 <GuidedEditor
-                  key={mode}
-                  kit={kitMode}
                   project={project}
                   page={activePage}
                   pages={pages}

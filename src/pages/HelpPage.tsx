@@ -45,11 +45,11 @@ const steps = [
 ];
 
 const kitFilesHelp = [
-  { file: 'copy.md · images.md · site.md · screenshot.jpg', when: 'After Source (import, paste or write). The screenshot only exists right after an import, in the same browser session.' },
-  { file: 'design.md', when: 'After Design.' },
-  { file: 'blueprint.md · fact-check.md', when: 'After Quick check (click Next to confirm the sections).' },
-  { file: 'prompt-<builder>-<output>.txt · README.md · ZIP', when: 'In Download kit — one prompt per chosen builder and output.' },
-  { file: 'prototype.html · changes.md', when: 'Only if you make the optional quick preview.' },
+  { file: 'Design → design.md', when: 'From the site, another site, or your own pasted file. Needs nothing else.' },
+  { file: 'Content → copy.md · images.md · site.md · screenshot.jpg', when: 'Import a URL, paste your text or let the AI write it. Needs nothing else. The screenshot only exists right after an import, in the same browser session.' },
+  { file: 'Sections → blueprint.md · fact-check.md', when: 'Optional. Needs content built into sections (Build Sections).' },
+  { file: 'Builder prompt → prompt files · README.md · ZIP', when: 'Needs design or content. The prompt adapts: only design → the builder asks you for the page; only content → the builder chooses the design.' },
+  { file: 'Quick preview → prototype.html · changes.md', when: 'Optional. Needs sections and design.' },
 ];
 
 const badges = [
@@ -195,12 +195,12 @@ export function HelpPage({ user, onSignOut }: HelpPageProps) {
                 <StepHeader num="04" title="Builder Kit, Guided and Advanced" />
                 <div className="help-body">
                   <p>Switch at the top right; the choice is remembered per project in this browser. <strong>Builder Kit</strong> is the default for new projects (Set up manually starts in Advanced); older projects keep the mode they had.</p>
-                  <p><strong>Builder Kit</strong> — four steps, one page: <strong>Source</strong> (import, paste or write the text) → <strong>Design</strong> → <strong>Quick check</strong> (fix or delete sections, then Next) → <strong>Download kit</strong> (choose builders and output, download the ZIP or single files). Every file can be downloaded on its own as soon as its step is done — from the <em>Kit files</em> row at the top or inside the step. At the end you can <strong>Also make a quick preview</strong> (≈ $0.30); it is then added as <code>prototype.html</code> and <code>changes.md</code>, and the builder follows it. Without a preview, the prompt tells the builder to design the page itself within <code>design.md</code>.</p>
+                  <p><strong>Builder Kit</strong> — one page, independent cards you use in any order: make only <code>design.md</code>, only the content, or both. <strong>What do you need?</strong> (in the New Project dialog and at the top of the kit) only decides which cards open first. Every file can be downloaded on its own as soon as it exists — from the <em>Kit files</em> row at the top or on its card. <strong>Download all (.zip)</strong> in Builder prompt contains only the files that exist. The optional <strong>Quick preview</strong> (≈ $0.30) adds <code>prototype.html</code> and <code>changes.md</code>, and the builder then follows it.</p>
                   <table className="help-table">
                     <thead>
                       <tr>
-                        <th>Kit file</th>
-                        <th>Ready</th>
+                        <th>Card → files</th>
+                        <th>What it needs</th>
                       </tr>
                     </thead>
                     <tbody>

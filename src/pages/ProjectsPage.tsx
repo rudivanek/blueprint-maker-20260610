@@ -8,7 +8,7 @@ import { loadSettings } from '../lib/settings';
 import { DEFAULT_MODEL } from '../lib/models';
 import { PRESETS, getPreset } from '../lib/presets';
 import type { ProjectPreset } from '../types';
-import { saveMode } from '../lib/editorMode';
+import { KIT_FOCUS, saveKitFocus, saveMode, type KitFocus } from '../lib/editorMode';
 import type { User } from '@supabase/supabase-js';
 
 interface ProjectsPageProps {
@@ -30,6 +30,7 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
   const [designFile, setDesignFile] = useState<{ name: string; text: string } | null>(null);
   const [brief, setBrief] = useState('');
   const [aiModel, setAiModel] = useState(DEFAULT_MODEL);
+  const [kitFocus, setKitFocus] = useState<KitFocus>('both');
   const keyStatus = useKeyStatus();
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
     setDesignFile(null);
     setBrief('');
     setAiModel(loadSettings().defaultModel || DEFAULT_MODEL);
+    setKitFocus('both');
     setShowNewModal(true);
   };
 
@@ -88,6 +90,7 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
       setShowNewModal(false);
       // New projects start in Builder Kit (manual set-up: the full editor)
       saveMode(project.id, isManual ? 'advanced' : 'kit');
+      if (!isManual) saveKitFocus(project.id, kitFocus);
       navigate(`/editor/${project.id}`);
     }
   };
@@ -383,6 +386,27 @@ export function ProjectsPage({ user }: ProjectsPageProps) {
                       {def.id === 'content' && (
                         <p className="text-[10px] text-[#9CA3AF] mt-1">Markdown works: # for headings, - for lists. Each # or ## starts a section. Your text is used word for word.</p>
                       )}
+                    </div>
+                  )}
+
+                  {def.id !== 'manual' && (
+                    <div>
+                      <p className="text-xs text-[#111827] font-medium mb-1.5">What do you need?</p>
+                      <div className="flex flex-wrap gap-1.5" role="group" aria-label="What do you need?">
+                        {KIT_FOCUS.map(f => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setKitFocus(f.id)}
+                            title={f.hint}
+                            aria-pressed={kitFocus === f.id}
+                            className={`px-2.5 py-1 text-xs border transition-colors ${kitFocus === f.id ? 'bg-[#2575FC] border-[#2575FC] text-white' : 'bg-white border-[#E5E7EB] text-[#374151] hover:border-[#2575FC]'}`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-[#9CA3AF] mt-1">Only decides what opens first in Builder Kit — you can make the other files any time.</p>
                     </div>
                   )}
 
